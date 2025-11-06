@@ -2,8 +2,9 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
+  "module": "Node16",
     "jsx": "react-jsx", // ✅ Enables JSX in TSX files
-    "moduleResolution": "node", // ✅ Explicit for compatibility
+  "moduleResolution": "node16", // ✅ Use node16 for modern condition support (required by some base configs)
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,

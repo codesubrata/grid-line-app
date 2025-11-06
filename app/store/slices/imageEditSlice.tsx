@@ -1,24 +1,13 @@
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 
-// Supported real-world units for grid and custom ratio overlays
-export type CustomUnit = "mm" | "cm" | "m" | "inch" | "ft";
+// Only cm for real-world units
+export type CustomUnit = "cm";
 
-export type RatioPreset =
-    | "ORIGINAL"
-    | "SQUARE"
-    | "A0"
-    | "A1"
-    | "A2"
-    | "A3"
-    | "A4"
-    | "A5"
-    | "RATIO_16_9"
-    | "RATIO_4_3"
-    | "RATIO_3_2"
-    | "CUSTOM";
+// Paper presets now include CUSTOM
+export type PaperPreset = "A0" | "A1" | "A2" | "A3" | "A4" | "A5" | "CUSTOM";
 
 export type LabelStyle = "NONE" | "ROW" | "COL" | "BOTH";
-export type ImageEffect = "none" | "grayscale" | "sepia" | "contrast" | "brightness";
+export type ImageEffect = "none" | "grayscale";
 
 interface CropRect {
     x: number;
@@ -34,81 +23,66 @@ interface FlipState {
 
 // Central edit state for editing session
 interface ImageEditState {
-    ratioPreset: RatioPreset;
-    ratioValue: number | null;
+    paperPresetType?: PaperPreset; // Can now be A0-A5 or CUSTOM
     rotateDeg: number;
     flip: FlipState;
     cropRect: CropRect;
     editedUri: string | null;
-    originalImageRatio: number | null;
     isAdvancedEditingEnabled: boolean;
 
-    // Custom ratio/paper dimensions, real-units for this overlay
+    // Custom paper dimensions in cm (for CUSTOM preset)
     customWidth: number | null;
     customHeight: number | null;
-    customUnit: CustomUnit;
 
     // Grid/overlay options
     isGridVisible: boolean;
-    gridRows: number;
-    gridCols: number;
-    cellSize: number; // In real-units, always mm for internal base (may be converted for display)
+    isDiagonalGridVisible: boolean; // NEW: diagonal grid visibility
     strokeColor: string;
-    strokeWidth: number; // Always in mm
+    strokeWidth: number; // in mm (keep for stroke precision)
     showLabels: boolean;
     labelStyle: LabelStyle;
     imageEffect: ImageEffect;
 
-    // NEW: Grid cell dimensions (width x height in real units)
-    gridCellWidth: number;  // Default: 20 (2 cm in mm)
-    gridCellHeight: number; // Default: 20 (2 cm in mm)
-    gridCellUnit: CustomUnit; // Default: "mm" (internally stored in mm)
-    gridMode: "default" | "advanced"; // Track which mode user selected
+    // Grid cell dimensions (in cm)
+    gridCellWidth: number;  // Default: 2 cm
+    gridCellHeight: number; // Default: 2 cm
+    gridMode: "default" | "advanced";
 }
 
-const RATIO_PRESETS = {
-    SQUARE: 1.0,
-    A0: 841 / 1189,
-    A1: 594 / 841,
-    A2: 420 / 594,
-    A3: 297 / 420,
-    A4: 210 / 297,
-    A5: 148 / 210,
-    RATIO_16_9: 16 / 9,
-    RATIO_4_3: 4 / 3,
-    RATIO_3_2: 3 / 2,
-} as const;
+// Paper preset sizes in cm (A0 to A5)
+const PAPER_SIZES_CM: Record<Exclude<PaperPreset, "CUSTOM">, { width: number; height: number }> = {
+    A0: { width: 84.1, height: 118.9 },
+    A1: { width: 59.4, height: 84.1 },
+    A2: { width: 42.0, height: 59.4 },
+    A3: { width: 29.7, height: 42.0 },
+    A4: { width: 21.0, height: 29.7 },
+    A5: { width: 14.8, height: 21.0 },
+};
 
 const initialCrop: CropRect = { x: 0.05, y: 0.05, width: 0.9, height: 0.9 };
 
 const initialState: ImageEditState = {
-    ratioPreset: "SQUARE",
-    ratioValue: RATIO_PRESETS.SQUARE,
+    paperPresetType: "A4",
     rotateDeg: 0,
     flip: { horizontal: false, vertical: false },
     cropRect: initialCrop,
     editedUri: null,
-    originalImageRatio: null,
     isAdvancedEditingEnabled: false,
 
     customWidth: null,
     customHeight: null,
-    customUnit: "mm",
 
     isGridVisible: false,
-    gridRows: 3,
-    gridCols: 3,
-    cellSize: 50, // base cell size in mm
+    isDiagonalGridVisible: false, // NEW: diagonal grid default off
     strokeColor: "#808080",
     strokeWidth: 1, // in mm
     showLabels: false,
     labelStyle: "NONE",
     imageEffect: "none",
 
-    // NEW: Grid cell dimensions
-    gridCellWidth: 20,  // 2 cm = 20 mm
-    gridCellHeight: 20, // 2 cm = 20 mm
-    gridCellUnit: "mm",
+    // Grid cell dimensions - default 2x2 cm
+    gridCellWidth: 2,
+    gridCellHeight: 2,
     gridMode: "default",
 };
 
@@ -126,68 +100,28 @@ function normalizeRotation(degrees: number): number {
     return ((degrees % 360) + 360) % 360;
 }
 
-function adjustCropRectToRatio(currentRect: CropRect, targetRatio: number | null): CropRect {
-    if (!targetRatio || targetRatio <= 0) {
-        return currentRect;
-    }
-    let { x, y, width, height } = currentRect;
-    const currentRatio = width / height;
-    if (Math.abs(currentRatio - targetRatio) < 0.001) {
-        return currentRect;
-    }
-    const centerX = x + width / 2;
-    const centerY = y + height / 2;
-    if (targetRatio > currentRatio) {
-        const newWidth = Math.min(height * targetRatio, 1);
-        width = newWidth;
-        if (width >= 1) {
-            height = width / targetRatio;
-        }
-    } else {
-        const newHeight = Math.min(width / targetRatio, 1);
-        height = newHeight;
-        if (height >= 1) {
-            width = height * targetRatio;
-        }
-    }
-    x = Math.max(0, Math.min(1 - width, centerX - width / 2));
-    y = Math.max(0, Math.min(1 - height, centerY - height / 2));
-    return validateCropRect({ x, y, width, height });
-}
-
-// Calculate cell size in mm (for internal calibration of square-like grid, not used directly when user chooses advanced custom units)
-function calculateCellSize(imageWidth: number, imageHeight: number, gridRows: number, gridCols: number): number {
-    if (!imageWidth || !imageHeight || gridRows <= 0 || gridCols <= 0) return 50;
-    const cellWidth = imageWidth / gridCols;
-    const cellHeight = imageHeight / gridRows;
-    return Math.min(cellWidth, cellHeight);
-}
-
-// Unified conversion for supported units (mm is used as base for grid logic)
-function convertDimensionUnit(value: number, fromUnit: CustomUnit, toUnit: CustomUnit): number {
-    if (fromUnit === toUnit) return value;
-    const toMm: Record<CustomUnit, number> = {
-        mm: 1,
-        cm: 10,
-        m: 1000,
-        inch: 25.4,
-        ft: 304.8,
-    };
-    const valueInMm = value * toMm[fromUnit];
-    return valueInMm / toMm[toUnit];
+// Validate custom dimensions
+function validateCustomDimensions(width: number | null, height: number | null): boolean {
+    if (width === null || height === null) return false;
+    if (!Number.isFinite(width) || !Number.isFinite(height)) return false;
+    if (width <= 0 || height <= 0) return false;
+    return true;
 }
 
 const slice = createSlice({
     name: "imageEdit",
     initialState,
     reducers: {
-        setOriginalImageRatio(state, action: PayloadAction<number>) {
-            state.originalImageRatio = action.payload;
-            if (state.ratioPreset === "ORIGINAL") {
-                state.ratioValue = action.payload;
-                state.cropRect = adjustCropRectToRatio(state.cropRect, action.payload);
+        setPaperPresetType(state, action: PayloadAction<PaperPreset>) {
+            state.paperPresetType = action.payload;
+
+            // If switching away from custom, clear custom dimensions
+            if (action.payload !== "CUSTOM") {
+                state.customWidth = null;
+                state.customHeight = null;
             }
         },
+
         setAdvancedEditingMode(state, action: PayloadAction<boolean>) {
             state.isAdvancedEditingEnabled = action.payload;
             if (!action.payload) {
@@ -196,339 +130,315 @@ const slice = createSlice({
                 state.cropRect = initialCrop;
             }
         },
-        setCustomDimensions(state, action: PayloadAction<{ width: number; height: number; unit: CustomUnit }>) {
-            state.customWidth = action.payload.width;
-            state.customHeight = action.payload.height;
-            state.customUnit = action.payload.unit;
-            if (state.customWidth > 0 && state.customHeight > 0) {
-                state.ratioPreset = "CUSTOM";
-                state.ratioValue = state.customWidth / state.customHeight;
-                state.cropRect = adjustCropRectToRatio(state.cropRect, state.ratioValue);
+
+        setCustomDimensions(state, action: PayloadAction<{ width: number; height: number }>) {
+            const { width, height } = action.payload;
+
+            if (validateCustomDimensions(width, height)) {
+                state.customWidth = width;
+                state.customHeight = height;
+                // Automatically set preset to CUSTOM when custom dimensions are set
+                state.paperPresetType = "CUSTOM";
             }
         },
+
         setCustomWidth(state, action: PayloadAction<number>) {
-            state.customWidth = action.payload;
-            if (state.customWidth && state.customHeight && state.customWidth > 0 && state.customHeight > 0) {
-                state.ratioValue = state.customWidth / state.customHeight;
-            }
-        },
-        setCustomHeight(state, action: PayloadAction<number>) {
-            state.customHeight = action.payload;
-            if (state.customWidth && state.customHeight && state.customWidth > 0 && state.customHeight > 0) {
-                state.ratioValue = state.customWidth / state.customHeight;
-            }
-        },
-        setCustomUnit(state, action: PayloadAction<CustomUnit>) {
-            state.customUnit = action.payload;
-        },
-        convertCustomDimensions(state, action: PayloadAction<{ toUnit: CustomUnit }>) {
-            const { toUnit } = action.payload;
-            if (state.customWidth !== null && state.customUnit !== toUnit) {
-                state.customWidth = convertDimensionUnit(state.customWidth, state.customUnit, toUnit);
-            }
-            if (state.customHeight !== null && state.customUnit !== toUnit) {
-                state.customHeight = convertDimensionUnit(state.customHeight, state.customUnit, toUnit);
-            }
-            state.customUnit = toUnit;
-        },
-        setRatioPreset(state, action: PayloadAction<{ preset: RatioPreset; ratio?: number }>) {
-            const { preset, ratio } = action.payload;
-            state.ratioPreset = preset;
-            let newRatio: number | null = null;
-            if (ratio !== undefined) {
-                newRatio = ratio;
-            } else if (preset === "ORIGINAL") {
-                newRatio = state.originalImageRatio;
-            } else if (preset === "CUSTOM") {
-                if (state.customWidth && state.customHeight && state.customWidth > 0 && state.customHeight > 0) {
-                    newRatio = state.customWidth / state.customHeight;
-                } else {
-                    newRatio = state.ratioValue;
+            const width = action.payload;
+            if (width > 0 && Number.isFinite(width)) {
+                state.customWidth = width;
+                // Only update to CUSTOM if we have valid height too
+                if (state.customHeight !== null && state.customHeight > 0) {
+                    state.paperPresetType = "CUSTOM";
                 }
-            } else if (preset in RATIO_PRESETS) {
-                newRatio = RATIO_PRESETS[preset as keyof typeof RATIO_PRESETS];
             }
-            state.ratioValue = newRatio;
-            state.cropRect = adjustCropRectToRatio(state.cropRect, newRatio);
         },
-        setRatioValue(state, action: PayloadAction<number | null>) {
-            const ratio = action.payload;
-            state.ratioValue = ratio && ratio > 0 ? ratio : null;
-            state.ratioPreset = ratio ? "CUSTOM" : "ORIGINAL";
-            state.cropRect = adjustCropRectToRatio(state.cropRect, ratio);
+
+        setCustomHeight(state, action: PayloadAction<number>) {
+            const height = action.payload;
+            if (height > 0 && Number.isFinite(height)) {
+                state.customHeight = height;
+                // Only update to CUSTOM if we have valid width too
+                if (state.customWidth !== null && state.customWidth > 0) {
+                    state.paperPresetType = "CUSTOM";
+                }
+            }
         },
+
+        clearCustomDimensions(state) {
+            state.customWidth = null;
+            state.customHeight = null;
+            // Revert to A4 if was custom
+            if (state.paperPresetType === "CUSTOM") {
+                state.paperPresetType = "A4";
+            }
+        },
+
         rotateLeft(state) {
             state.rotateDeg = normalizeRotation(state.rotateDeg - 90);
         },
+
         rotateRight(state) {
             state.rotateDeg = normalizeRotation(state.rotateDeg + 90);
         },
+
         setRotation(state, action: PayloadAction<number>) {
             state.rotateDeg = normalizeRotation(action.payload);
         },
+
         toggleFlipHorizontal(state) {
             state.flip.horizontal = !state.flip.horizontal;
         },
+
         toggleFlipVertical(state) {
             state.flip.vertical = !state.flip.vertical;
         },
+
         setFlip(state, action: PayloadAction<{ horizontal?: boolean; vertical?: boolean }>) {
             const { horizontal, vertical } = action.payload;
             if (horizontal !== undefined) state.flip.horizontal = horizontal;
             if (vertical !== undefined) state.flip.vertical = vertical;
         },
+
         setCropRect(state, action: PayloadAction<CropRect>) {
             const rect = validateCropRect(action.payload);
             if (rect.x + rect.width > 1) rect.x = Math.max(0, 1 - rect.width);
             if (rect.y + rect.height > 1) rect.y = Math.max(0, 1 - rect.height);
             state.cropRect = rect;
         },
+
         resetCropRect(state) {
-            const ratio = state.ratioValue;
-            let resetRect = { ...initialCrop };
-            if (ratio && ratio > 0) resetRect = adjustCropRectToRatio(resetRect, ratio);
-            state.cropRect = resetRect;
+            state.cropRect = { ...initialCrop };
         },
+
         setEditedUri(state, action: PayloadAction<string>) {
             state.editedUri = action.payload;
         },
+
         clearEditedUri(state) {
             state.editedUri = null;
         },
+
         resetAllEdits(state) {
             Object.assign(state, initialState);
         },
+
         resetTransforms(state) {
             state.rotateDeg = 0;
             state.flip = { horizontal: false, vertical: false };
         },
-        // 🧩 Enhanced grid reducers
+
+        // Grid reducers
         setGridVisibility(state, action: PayloadAction<boolean>) {
             state.isGridVisible = action.payload;
+            // If grid is disabled and diagonal also off, hide labels
+            if (!state.isGridVisible && !state.isDiagonalGridVisible && state.showLabels) {
+                state.showLabels = false;
+            }
         },
-        setGridRows(state, action: PayloadAction<number>) {
-            state.gridRows = Math.max(1, action.payload);
+
+        // NEW: Diagonal grid reducers
+        setDiagonalGridVisibility(state, action: PayloadAction<boolean>) {
+            state.isDiagonalGridVisible = action.payload;
+            // If diagonal grid is disabled and grid also off, hide labels
+            if (!state.isDiagonalGridVisible && !state.isGridVisible && state.showLabels) {
+                state.showLabels = false;
+            }
         },
-        setGridCols(state, action: PayloadAction<number>) {
-            state.gridCols = Math.max(1, action.payload);
+
+        toggleDiagonalGridVisibility(state) {
+            state.isDiagonalGridVisible = !state.isDiagonalGridVisible;
+            // If both grids off, hide labels
+            if (!state.isDiagonalGridVisible && !state.isGridVisible && state.showLabels) {
+                state.showLabels = false;
+            }
         },
-        setCellSize(state, action: PayloadAction<number>) {
-            state.cellSize = Math.max(1, action.payload);
-        },
+
         setStrokeColor(state, action: PayloadAction<string>) {
             state.strokeColor = action.payload;
         },
+
         setStrokeWidth(state, action: PayloadAction<number>) {
             state.strokeWidth = Math.max(0.1, action.payload);
         },
+
         setShowLabels(state, action: PayloadAction<boolean>) {
             state.showLabels = action.payload;
         },
+
         setLabelStyle(state, action: PayloadAction<LabelStyle>) {
             state.labelStyle = action.payload;
         },
+
         setImageEffect(state, action: PayloadAction<ImageEffect>) {
             state.imageEffect = action.payload;
         },
-        updateCellSizeFromImage(state, action: PayloadAction<{ width: number; height: number }>) {
-            const { width, height } = action.payload;
-            state.cellSize = calculateCellSize(width, height, state.gridRows, state.gridCols);
-        },
-        updateGridFromDimensions(state, action: PayloadAction<{
-            imageWidth: number;
-            imageHeight: number;
-            presetWidth?: number;
-            presetHeight?: number;
-            presetUnit?: CustomUnit;
-        }>) {
-            const { imageWidth, imageHeight } = action.payload;
-            state.cellSize = calculateCellSize(imageWidth, imageHeight, state.gridRows, state.gridCols);
-        },
+
         resetGridSettings(state) {
-            state.gridRows = 3;
-            state.gridCols = 3;
+            state.isGridVisible = false;
+            state.isDiagonalGridVisible = false;
             state.strokeColor = "#808080";
             state.strokeWidth = 1;
             state.showLabels = false;
             state.labelStyle = "NONE";
             state.imageEffect = "none";
-            state.cellSize = 50;
-            // Reset grid cell dimensions
-            state.gridCellWidth = 20;  // 2 cm = 20 mm
-            state.gridCellHeight = 20; // 2 cm = 20 mm
-            state.gridCellUnit = "mm";
+            state.gridCellWidth = 2;
+            state.gridCellHeight = 2;
             state.gridMode = "default";
         },
+
         toggleGridVisibility(state) {
             state.isGridVisible = !state.isGridVisible;
+            // If both grids off, hide labels
+            if (!state.isGridVisible && !state.isDiagonalGridVisible && state.showLabels) {
+                state.showLabels = false;
+            }
         },
+
         setGridConfiguration(state, action: PayloadAction<{
-            rows?: number;
-            cols?: number;
             strokeColor?: string;
             strokeWidth?: number;
             showLabels?: boolean;
             labelStyle?: LabelStyle;
         }>) {
-            const { rows, cols, strokeColor, strokeWidth, showLabels, labelStyle } = action.payload;
-            if (rows !== undefined) state.gridRows = Math.max(1, rows);
-            if (cols !== undefined) state.gridCols = Math.max(1, cols);
+            const { strokeColor, strokeWidth, showLabels, labelStyle } = action.payload;
             if (strokeColor !== undefined) state.strokeColor = strokeColor;
             if (strokeWidth !== undefined) state.strokeWidth = Math.max(0.1, strokeWidth);
             if (showLabels !== undefined) state.showLabels = showLabels;
             if (labelStyle !== undefined) state.labelStyle = labelStyle;
         },
 
-        // NEW: Grid cell dimension reducers
+        // Grid cell dimension reducers (cm only)
         setGridMode(state, action: PayloadAction<"default" | "advanced">) {
             state.gridMode = action.payload;
             if (action.payload === "default") {
-                // Reset to default 2x2 cm
-                state.gridCellWidth = 20;  // 2 cm in mm
-                state.gridCellHeight = 20; // 2 cm in mm
-                state.gridCellUnit = "mm";
+                state.gridCellWidth = 2;  // 2 cm
+                state.gridCellHeight = 2; // 2 cm
             }
         },
 
-        setGridCellDimensions(state, action: PayloadAction<{
-            width: number;
-            height: number;
-            unit: CustomUnit;
-        }>) {
-            const { width, height, unit } = action.payload;
-
-            // Convert to mm for internal storage
-            state.gridCellWidth = convertDimensionUnit(width, unit, "mm");
-            state.gridCellHeight = convertDimensionUnit(height, unit, "mm");
-            state.gridCellUnit = "mm"; // Always store internally in mm
-
-            state.gridMode = "advanced";
-        },
-
-        setGridCellWidth(state, action: PayloadAction<{
-            width: number;
-            unit: CustomUnit;
-        }>) {
-            const { width, unit } = action.payload;
-            state.gridCellWidth = convertDimensionUnit(width, unit, "mm");
-            state.gridMode = "advanced";
-        },
-
-        setGridCellHeight(state, action: PayloadAction<{
-            height: number;
-            unit: CustomUnit;
-        }>) {
-            const { height, unit } = action.payload;
-            state.gridCellHeight = convertDimensionUnit(height, unit, "mm");
-            state.gridMode = "advanced";
-        },
-
-        // Auto-calculate rows and columns based on image dimensions and cell size
-        calculateGridFromCellSize(state, action: PayloadAction<{
-            imageWidth: number;
-            imageHeight: number;
-            realWorldWidth?: number;
-            realWorldHeight?: number;
-            realWorldUnit?: CustomUnit;
-        }>) {
-            const {
-                imageWidth,
-                imageHeight,
-                realWorldWidth,
-                realWorldHeight,
-                realWorldUnit = "mm"
-            } = action.payload;
-
-            // Use real-world dimensions if available, otherwise use pixel dimensions
-            let imageWidthMm = realWorldWidth || imageWidth;
-            let imageHeightMm = realWorldHeight || imageHeight;
-
-            // Convert real-world dimensions to mm if needed
-            if (realWorldUnit && realWorldUnit !== "mm") {
-                imageWidthMm = convertDimensionUnit(imageWidthMm, realWorldUnit, "mm");
-                imageHeightMm = convertDimensionUnit(imageHeightMm, realWorldUnit, "mm");
+        setGridCellWidth(state, action: PayloadAction<number>) {
+            const width = action.payload;
+            if (width > 0 && Number.isFinite(width)) {
+                state.gridCellWidth = width;
+                state.gridMode = "advanced";
             }
+        },
 
-            // Calculate rows and columns
-            if (state.gridCellWidth > 0 && state.gridCellHeight > 0) {
-                state.gridCols = Math.max(1, Math.floor(imageWidthMm / state.gridCellWidth));
-                state.gridRows = Math.max(1, Math.floor(imageHeightMm / state.gridCellHeight));
+        setGridCellHeight(state, action: PayloadAction<number>) {
+            const height = action.payload;
+            if (height > 0 && Number.isFinite(height)) {
+                state.gridCellHeight = height;
+                state.gridMode = "advanced";
+            }
+        },
+
+        setGridCellDimensions(state, action: PayloadAction<{ width: number; height: number }>) {
+            const { width, height } = action.payload;
+            if (width > 0 && height > 0 && Number.isFinite(width) && Number.isFinite(height)) {
+                state.gridCellWidth = width;
+                state.gridCellHeight = height;
+                state.gridMode = "advanced";
             }
         },
     },
 });
 
-export const selectEditState = (state: any) => state.imageEdit;
-export const selectGridOptions = (state: any) => ({
+// Selectors
+export const selectEditState = (state: { imageEdit: ImageEditState }) => state.imageEdit;
+
+export const selectGridOptions = (state: { imageEdit: ImageEditState }) => ({
     isGridVisible: state.imageEdit.isGridVisible,
-    gridRows: state.imageEdit.gridRows,
-    gridCols: state.imageEdit.gridCols,
-    cellSize: state.imageEdit.cellSize,
+    isDiagonalGridVisible: state.imageEdit.isDiagonalGridVisible, // NEW
     strokeColor: state.imageEdit.strokeColor,
     strokeWidth: state.imageEdit.strokeWidth,
     showLabels: state.imageEdit.showLabels,
     labelStyle: state.imageEdit.labelStyle,
     imageEffect: state.imageEdit.imageEffect,
 });
-export const selectGridConfiguration = (state: any) => ({
-    rows: state.imageEdit.gridRows,
-    cols: state.imageEdit.gridCols,
+
+export const selectGridConfiguration = (state: { imageEdit: ImageEditState }) => ({
     strokeColor: state.imageEdit.strokeColor,
     strokeWidth: state.imageEdit.strokeWidth,
     isVisible: state.imageEdit.isGridVisible,
+    isDiagonalVisible: state.imageEdit.isDiagonalGridVisible, // NEW
     showLabels: state.imageEdit.showLabels,
     labelStyle: state.imageEdit.labelStyle,
 });
-export const selectCustomDimensions = (state: any) => ({
+
+export const selectCustomDimensions = (state: { imageEdit: ImageEditState }) => ({
     width: state.imageEdit.customWidth,
     height: state.imageEdit.customHeight,
-    unit: state.imageEdit.customUnit,
-    ratio: state.imageEdit.customWidth && state.imageEdit.customHeight
-        ? state.imageEdit.customWidth / state.imageEdit.customHeight
-        : null,
+    unit: "cm" as const,
+    isValid: validateCustomDimensions(state.imageEdit.customWidth, state.imageEdit.customHeight),
 });
-export const selectCustomDimensionsFormatted = (state: any) => {
-    const { customWidth, customHeight, customUnit } = state.imageEdit;
-    return {
-        width: customWidth !== null ? `${customWidth.toFixed(customUnit === 'px' ? 0 : 2)} ${customUnit}` : 'N/A',
-        height: customHeight !== null ? `${customHeight.toFixed(customUnit === 'px' ? 0 : 2)} ${customUnit}` : 'N/A',
-        unit: customUnit,
-        dimensions: customWidth && customHeight ? `${customWidth}×${customHeight}${customUnit}` : 'N/A',
-    };
-};
-export const selectGridWithCalculations = (state: any) => {
+
+export const selectGridWithCalculations = (state: { imageEdit: ImageEditState }) => {
     const gridState = state.imageEdit;
     return {
         ...selectGridConfiguration(state),
-        cellSize: gridState.cellSize,
-        totalCells: gridState.gridRows * gridState.gridCols,
-        aspectRatio: gridState.gridRows / gridState.gridCols,
+        cellWidth: gridState.gridCellWidth,
+        cellHeight: gridState.gridCellHeight,
+        mode: gridState.gridMode,
     };
 };
 
-// NEW: Grid cell dimension selectors
-export const selectGridCellDimensions = (state: any) => ({
+// Grid cell dimension selectors (cm only)
+export const selectGridCellDimensions = (state: { imageEdit: ImageEditState }) => ({
     width: state.imageEdit.gridCellWidth,
     height: state.imageEdit.gridCellHeight,
-    unit: "mm", // Always mm internally
+    unit: "cm" as const,
     mode: state.imageEdit.gridMode,
 });
 
-export const selectGridCellDimensionsInUnit = (state: any, unit: CustomUnit) => {
-    const { gridCellWidth, gridCellHeight, gridMode } = state.imageEdit;
+export const selectPaperPreset = (state: { imageEdit: ImageEditState }) => ({
+    preset: state.imageEdit.paperPresetType,
+    isCustom: state.imageEdit.paperPresetType === "CUSTOM",
+    customWidth: state.imageEdit.customWidth,
+    customHeight: state.imageEdit.customHeight,
+});
+
+export const selectPaperSize = (state: { imageEdit: ImageEditState }) => {
+    const preset = state.imageEdit.paperPresetType;
+
+    if (preset === "CUSTOM") {
+        return {
+            width: state.imageEdit.customWidth,
+            height: state.imageEdit.customHeight,
+            preset: "CUSTOM" as const,
+            isValid: validateCustomDimensions(state.imageEdit.customWidth, state.imageEdit.customHeight),
+        };
+    }
+
+    if (preset && preset in PAPER_SIZES_CM) {
+        const size = PAPER_SIZES_CM[preset as Exclude<PaperPreset, "CUSTOM">];
+        return {
+            width: size.width,
+            height: size.height,
+            preset,
+            isValid: true,
+        };
+    }
+
+    // Default to A4
     return {
-        width: convertDimensionUnit(gridCellWidth, "mm", unit),
-        height: convertDimensionUnit(gridCellHeight, "mm", unit),
-        unit: unit,
-        mode: gridMode,
+        width: PAPER_SIZES_CM.A4.width,
+        height: PAPER_SIZES_CM.A4.height,
+        preset: "A4" as const,
+        isValid: true,
     };
 };
 
+export const selectIsCustomPaper = (state: { imageEdit: ImageEditState }) =>
+    state.imageEdit.paperPresetType === "CUSTOM";
+
+export const selectHasValidCustomPaper = (state: { imageEdit: ImageEditState }) =>
+    state.imageEdit.paperPresetType === "CUSTOM" &&
+    validateCustomDimensions(state.imageEdit.customWidth, state.imageEdit.customHeight);
+
+// Export actions
 export const {
-    setOriginalImageRatio,
+    setPaperPresetType,
     setAdvancedEditingMode,
-    setRatioPreset,
-    setRatioValue,
     rotateLeft,
     rotateRight,
     setRotation,
@@ -544,29 +454,24 @@ export const {
     setCustomDimensions,
     setCustomWidth,
     setCustomHeight,
-    setCustomUnit,
-    convertCustomDimensions,
+    clearCustomDimensions,
     setGridVisibility,
-    setGridRows,
-    setGridCols,
-    setCellSize,
+    setDiagonalGridVisibility, // NEW
+    toggleDiagonalGridVisibility, // NEW
     setStrokeColor,
     setStrokeWidth,
     setShowLabels,
     setLabelStyle,
     setImageEffect,
-    updateCellSizeFromImage,
-    updateGridFromDimensions,
     resetGridSettings,
     toggleGridVisibility,
     setGridConfiguration,
-    // NEW exports
     setGridMode,
     setGridCellDimensions,
     setGridCellWidth,
     setGridCellHeight,
-    calculateGridFromCellSize,
 } = slice.actions;
 
-export { RATIO_PRESETS, calculateCellSize, convertDimensionUnit };
+// Export paper sizes and types
+export { PAPER_SIZES_CM };
 export default slice.reducer;

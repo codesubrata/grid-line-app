@@ -1,14 +1,15 @@
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import React, { useState } from 'react';
 import {
     Dimensions,
+    Pressable,
     ScrollView,
     StyleSheet,
+    Switch,
     Text,
     View,
-    Switch,
-    Pressable,
 } from 'react-native';
-import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { useSelector } from 'react-redux';
 
 // Tool Type
 interface EditTool {
@@ -48,6 +49,9 @@ const GridEditTools: React.FC<GridEditToolsProps> = ({
         { id: 'sharpen', name: 'Sharpen', icon: 'tune', category: 'effects' },
     ];
 
+
+
+    // Handle Grid Toggle
     const handleGridToggle = (value: boolean) => {
         onGridToggle?.(value);
         onToolSelect?.('grid');
@@ -57,15 +61,22 @@ const GridEditTools: React.FC<GridEditToolsProps> = ({
         }
     };
 
+    // Handle Diagonal Grid Toggle
     const handleDiagonalGridToggle = (value: boolean) => {
+        console.log("Diagonal Grid toggled:", value);  // <-- Add this line to log the value
+
         onDiagonalGridToggle?.(value);
         onToolSelect?.('diagonal');
         // If both grid AND diagonal grid are off, also disable label
         if (!value && !isGridVisible && isLabelVisible) {
             onLabelToggle?.(false);
         }
+
+        // console.log("Diagonal Grid visibility from Redux slice:", isDiagonalGridVisible);
     };
 
+
+    // Handle Label Toggle
     const handleLabelToggle = (value: boolean) => {
         // Allow toggling label only if grid or diagonal grid is enabled
         if (isGridVisible || isDiagonalGridVisible) {
@@ -74,6 +85,7 @@ const GridEditTools: React.FC<GridEditToolsProps> = ({
         }
     };
 
+    // Handle Tool Press
     const handleToolPress = (toolId: string) => {
         setActiveTool(prev => (prev === toolId ? null : toolId));
         onToolSelect?.(toolId);
@@ -227,9 +239,8 @@ const styles = StyleSheet.create({
         shadowOffset: { width: 0, height: 0 },
         shadowOpacity: 0.9,
         shadowRadius: 15,
-        elevation: 25, 
+        elevation: 25,
     },
-
 
     toolLabel: {
         fontSize: 10,

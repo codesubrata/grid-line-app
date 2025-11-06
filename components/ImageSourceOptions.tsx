@@ -6,152 +6,97 @@ import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Tex
 import { useDispatch, useSelector } from 'react-redux';
 import {
     resetAllEdits,
-    setCustomHeight,
-    setCustomUnit,
-    setCustomWidth,
-    setOriginalImageRatio,
-    setRatioPreset,
-    type CustomUnit,
-    type RatioPreset
+    setPaperPresetType,
+    type PaperPreset
 } from '../app/store/slices/imageEditSlice';
 import { setImage, setImageError, setImageLoading } from '../app/store/slices/imageSlice';
 import type { RootState } from '../app/store/store';
+
 
 // ========================================
 // TYPE DEFINITIONS & CONSTANTS
 // ========================================
 
+
 export type AspectRatio = {
     label: string;
-    value: [number, number] | null;
-    preset: RatioPreset;
+    preset: PaperPreset;
     description: string;
-    unit: 'mm' | 'ratio';
-    mmWidth?: number;
-    mmHeight?: number;
+    cmWidth: number;
+    cmHeight: number;
 };
 
+
+// A0 to A5 presets + Custom option
 const ASPECT_RATIOS: AspectRatio[] = [
     {
-        label: "1:1",
-        value: [1, 1],
-        preset: "SQUARE",
-        description: "Square • Social media",
-        unit: 'mm',
-        mmWidth: 300,
-        mmHeight: 300
-    },
-    {
         label: "A0",
-        value: [841, 1189],
         preset: "A0",
-        description: "841×1189mm • Poster",
-        unit: 'mm',
-        mmWidth: 841,
-        mmHeight: 1189
+        description: "84.1×118.9 cm • Large Poster",
+        cmWidth: 84.1,
+        cmHeight: 118.9
     },
     {
         label: "A1",
-        value: [594, 841],
         preset: "A1",
-        description: "594×841mm • Large Poster",
-        unit: 'mm',
-        mmWidth: 594,
-        mmHeight: 841
+        description: "59.4×84.1 cm • Poster",
+        cmWidth: 59.4,
+        cmHeight: 84.1
     },
     {
         label: "A2",
-        value: [420, 594],
         preset: "A2",
-        description: "420×594mm • Medium Poster",
-        unit: 'mm',
-        mmWidth: 420,
-        mmHeight: 594
+        description: "42.0×59.4 cm • Medium Poster",
+        cmWidth: 42.0,
+        cmHeight: 59.4
     },
     {
         label: "A3",
-        value: [297, 420],
         preset: "A3",
-        description: "297×420mm • Small Poster",
-        unit: 'mm',
-        mmWidth: 297,
-        mmHeight: 420
+        description: "29.7×42.0 cm • Small Poster",
+        cmWidth: 29.7,
+        cmHeight: 42.0
     },
     {
         label: "A4",
-        value: [210, 297],
         preset: "A4",
-        description: "210×297mm • Standard Document",
-        unit: 'mm',
-        mmWidth: 210,
-        mmHeight: 297
+        description: "21.0×29.7 cm • Standard Document",
+        cmWidth: 21.0,
+        cmHeight: 29.7
     },
     {
         label: "A5",
-        value: [148, 210],
         preset: "A5",
-        description: "148×210mm • Small Document",
-        unit: 'mm',
-        mmWidth: 148,
-        mmHeight: 210
-    },
-    {
-        label: "16:9",
-        value: [16, 9],
-        preset: "RATIO_16_9",
-        description: "Widescreen • Photo",
-        unit: 'mm',
-        mmWidth: 508,
-        mmHeight: 286
-    },
-    {
-        label: "4:3",
-        value: [4, 3],
-        preset: "RATIO_4_3",
-        description: "Traditional • Photo",
-        unit: 'mm',
-        mmWidth: 270,
-        mmHeight: 203
-    },
-    {
-        label: "3:2",
-        value: [3, 2],
-        preset: "RATIO_3_2",
-        description: "35mm film • DSLR",
-        unit: 'mm',
-        mmWidth: 397,
-        mmHeight: 265
+        description: "14.8×21.0 cm • Small Document",
+        cmWidth: 14.8,
+        cmHeight: 21.0
     },
     {
         label: "Custom",
-        value: null,
         preset: "CUSTOM",
         description: "Set your own dimensions",
-        unit: 'mm'
+        cmWidth: 21.0,
+        cmHeight: 29.7
     },
 ];
 
-const UNITS: { value: CustomUnit; label: string }[] = [
-    { value: "mm", label: "mm" },
-    { value: "cm", label: "cm" },
-    { value: "m", label: "m" },
-    { value: "inch", label: "inch" },
-    { value: "ft", label: "ft" },
-];
 
 type Props = {
     isSelectRatioModalVisible: boolean;
     onClose: () => void;
     onAdvancedCrop?: (uri: string) => void;
-    onImageSelected?: () => void; // NEW: Callback when image is selected to redirect/navigate
+    onImageSelected?: () => void;
 };
+
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 
+
 // ========================================
 // UTILITY FUNCTIONS
 // ========================================
+
 
 const extractImageFormat = (uri: string, mimeType?: string): string => {
     if (mimeType) {
@@ -178,6 +123,7 @@ const extractImageFormat = (uri: string, mimeType?: string): string => {
     return 'unknown';
 };
 
+
 const extractFileName = (uri: string): string => {
     try {
         const pathParts = uri.split('/');
@@ -188,6 +134,7 @@ const extractFileName = (uri: string): string => {
         return 'unknown';
     }
 };
+
 
 const validateImageFile = (
     uri: string,
@@ -217,9 +164,34 @@ const validateImageFile = (
     return { isValid: true };
 };
 
+
+const validateCustomDimensions = (
+    width: string,
+    height: string
+): { isValid: boolean; error?: string } => {
+    const w = parseFloat(width);
+    const h = parseFloat(height);
+
+    if (isNaN(w) || isNaN(h)) {
+        return { isValid: false, error: "Please enter valid numbers for width and height" };
+    }
+
+    if (w <= 0 || h <= 0) {
+        return { isValid: false, error: "Width and height must be greater than 0" };
+    }
+
+    if (w > 1000 || h > 1000) {
+        return { isValid: false, error: "Dimensions cannot exceed 1000 cm" };
+    }
+
+    return { isValid: true };
+};
+
+
 // ========================================
 // MAIN COMPONENT
 // ========================================
+
 
 const ImageSourceOptions = ({
     isSelectRatioModalVisible,
@@ -229,113 +201,116 @@ const ImageSourceOptions = ({
 }: Props) => {
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [isImageSourceModalVisible, setIsImageSourceModalVisible] = useState<boolean>(false);
-    const [showRatioPicker, setShowRatioPicker] = useState<boolean>(false);
-    const [showUnitPicker, setShowUnitPicker] = useState<boolean>(false);
+    const [showPaperPicker, setShowPaperPicker] = useState<boolean>(false);
+    const [customWidth, setCustomWidth] = useState<string>('21.0');
+    const [customHeight, setCustomHeight] = useState<string>('29.7');
+    const [customDimensionError, setCustomDimensionError] = useState<string>('');
 
-    const [customWidthInput, setCustomWidthInput] = useState<string>('');
-    const [customHeightInput, setCustomHeightInput] = useState<string>('');
 
     const dispatch = useDispatch();
 
-    const selectedPreset = useSelector((state: RootState) => state.imageEdit.ratioPreset);
-    const customWidth = useSelector((state: RootState) => state.imageEdit.customWidth);
-    const customHeight = useSelector((state: RootState) => state.imageEdit.customHeight);
-    const customUnit = useSelector((state: RootState) => state.imageEdit.customUnit);
-    const ratioValue = useSelector((state: RootState) => state.imageEdit.ratioValue);
 
-    const selectedRatio = ASPECT_RATIOS.find(ratio => ratio.preset === selectedPreset);
+    const selectedPreset = useSelector((state: RootState) => state.imageEdit.paperPresetType);
+    const selectedPaper = ASPECT_RATIOS.find(paper => paper.preset === selectedPreset);
+
 
     // ========================================
-    // EFFECT HOOKS - MODIFIED BEHAVIOR
+    // EFFECT HOOKS
     // ========================================
 
-    // REMOVED: Auto-reset on modal open - only reset when image is actually selected
-    // useEffect(() => {
-    //     if (isSelectRatioModalVisible) {
-    //         dispatch(resetAllEdits());
-    //         setCustomWidthInput('');
-    //         setCustomHeightInput('');
-    //     }
-    // }, [isSelectRatioModalVisible, dispatch]);
-
-    useEffect(() => {
-        if (typeof customWidth === "number" && customWidth !== null) {
-            setCustomWidthInput(customWidth.toString());
-        } else {
-            setCustomWidthInput("");
-        }
-        if (typeof customHeight === "number" && customHeight !== null) {
-            setCustomHeightInput(customHeight.toString());
-        } else {
-            setCustomHeightInput("");
-        }
-    }, [customWidth, customHeight]);
 
     useEffect(() => {
         if (!isSelectRatioModalVisible) {
             setIsLoading(false);
             setIsImageSourceModalVisible(false);
-            setShowRatioPicker(false);
-            setShowUnitPicker(false);
+            setShowPaperPicker(false);
+            setCustomDimensionError('');
         }
     }, [isSelectRatioModalVisible]);
+
 
     // ========================================
     // EVENT HANDLERS
     // ========================================
 
-    const handleRatioChange = (preset: RatioPreset) => {
-        dispatch(setRatioPreset({ preset }));
-        setShowRatioPicker(false);
+
+    const handlePaperChange = (preset: PaperPreset) => {
+        setCustomDimensionError('');
+        dispatch(setPaperPresetType(preset));
+        setShowPaperPicker(false);
     };
 
-    const handleCustomWidthChange = (text: string) => {
-        setCustomWidthInput(text);
-        const value = parseFloat(text);
-        if (!isNaN(value) && value > 0) {
-            dispatch(setCustomWidth(value));
-        }
-    };
-
-    const handleCustomHeightChange = (text: string) => {
-        setCustomHeightInput(text);
-        const value = parseFloat(text);
-        if (!isNaN(value) && value > 0) {
-            dispatch(setCustomHeight(value));
-        }
-    };
-
-    const handleUnitChange = (unit: CustomUnit) => {
-        dispatch(setCustomUnit(unit));
-        setShowUnitPicker(false);
-    };
 
     const isContinueEnabled = () => {
+        if (!selectedPaper) return false;
+
+        // If custom selected, validate dimensions
         if (selectedPreset === "CUSTOM") {
-            return customWidth && customHeight && customWidth > 0 && customHeight > 0;
+            const validation = validateCustomDimensions(customWidth, customHeight);
+            return validation.isValid;
         }
-        return selectedRatio !== undefined;
+
+        return true;
     };
 
-    const getAspectRatioForPicker = () => {
-        if (selectedPreset === "CUSTOM" && ratioValue) {
-            if (ratioValue >= 1) {
-                return [ratioValue, 1];
-            } else {
-                return [1, 1 / ratioValue];
+
+    const getSelectedPaperDisplayText = () => {
+        if (selectedPaper) {
+            if (selectedPreset === "CUSTOM") {
+                const w = parseFloat(customWidth) || 21.0;
+                const h = parseFloat(customHeight) || 29.7;
+                return `Custom (${w}×${h} cm)`;
             }
+            return `${selectedPaper.label} (${selectedPaper.cmWidth}×${selectedPaper.cmHeight} cm)`;
         }
-        return selectedRatio?.value || [1, 1];
+        return 'Select Paper Size';
     };
 
+
+    const getAspectRatioForPicker = (): [number, number] => {
+        if (selectedPreset === "CUSTOM") {
+            const w = parseFloat(customWidth) || 21.0;
+            const h = parseFloat(customHeight) || 29.7;
+            return [w, h];
+        }
+        if (selectedPaper) {
+            return [selectedPaper.cmWidth, selectedPaper.cmHeight];
+        }
+        return [21.0, 29.7]; // Default A4
+    };
+
+
+    const handleCustomWidthChange = (text: string) => {
+        setCustomWidth(text);
+        setCustomDimensionError('');
+    };
+
+
+    const handleCustomHeightChange = (text: string) => {
+        setCustomHeight(text);
+        setCustomDimensionError('');
+    };
+
+
     // ========================================
-    // IMAGE PICKING & PROCESSING - UPDATED WITH STORE RESET
+    // IMAGE PICKING & PROCESSING
     // ========================================
+
 
     const pickImage = async (source: 'camera' | 'gallery') => {
         if (!isContinueEnabled()) {
-            Alert.alert('Error', 'Please select or configure an aspect ratio first');
+            Alert.alert('Error', 'Please select a paper size or set valid custom dimensions');
             return;
+        }
+
+        // Validate custom dimensions if needed
+        if (selectedPreset === "CUSTOM") {
+            const validation = validateCustomDimensions(customWidth, customHeight);
+            if (!validation.isValid) {
+                setCustomDimensionError(validation.error || 'Invalid dimensions');
+                Alert.alert('Invalid Dimensions', validation.error || 'Please enter valid dimensions');
+                return;
+            }
         }
 
         try {
@@ -362,7 +337,7 @@ const ImageSourceOptions = ({
                 result = await ImagePicker.launchCameraAsync({
                     mediaTypes: ImagePicker.MediaTypeOptions.Images,
                     allowsEditing: true,
-                    aspect: aspectRatio as [number, number],
+                    aspect: aspectRatio,
                     quality: 0.9,
                     allowsMultipleSelection: false,
                 });
@@ -383,7 +358,7 @@ const ImageSourceOptions = ({
                 result = await ImagePicker.launchImageLibraryAsync({
                     mediaTypes: ImagePicker.MediaTypeOptions.Images,
                     allowsEditing: true,
-                    aspect: aspectRatio as [number, number],
+                    aspect: aspectRatio,
                     quality: 0.9,
                     allowsMultipleSelection: false,
                 });
@@ -399,102 +374,51 @@ const ImageSourceOptions = ({
                     return;
                 }
 
-                // ========================================
-                // NEW: RESET STORE TO DEFAULT VALUES WHEN IMAGE IS SELECTED
-                // ========================================
-                // This resets the imageEdit state to defaults - triggered only when image is picked
+                // Reset store to default values
                 dispatch(resetAllEdits());
 
-                // Determine real-world dimensions and paper type for accurate grid overlay
-                let realWorldWidth: number | undefined = undefined;
-                let realWorldHeight: number | undefined = undefined;
-                let realWorldUnit: CustomUnit | undefined = undefined;
-                let paperPresetType: string | undefined = undefined;
+                // Set real-world dimensions
+                let realWorldWidth: number;
+                let realWorldHeight: number;
 
-                let presetWidth: number | undefined = undefined;
-                let presetHeight: number | undefined = undefined;
-                let presetUnit: CustomUnit | undefined = undefined;
-
-                if (selectedRatio) {
-                    if (selectedRatio.unit === 'mm' && selectedRatio.mmWidth && selectedRatio.mmHeight) {
-                        // Paper sizes - store real-world dimensions for grid calculation
-                        realWorldWidth = selectedRatio.mmWidth;
-                        realWorldHeight = selectedRatio.mmHeight;
-                        realWorldUnit = 'mm' as CustomUnit;
-                        paperPresetType = selectedRatio.preset as string;
-
-                        // Also set as preset dimensions for UI display
-                        presetWidth = selectedRatio.mmWidth;
-                        presetHeight = selectedRatio.mmHeight;
-                        presetUnit = 'mm' as CustomUnit;
-                    } else {
-                        // Ratio-based presets - no real dimensions, just ratio
-                        realWorldWidth = undefined;
-                        realWorldHeight = undefined;
-                        realWorldUnit = undefined;
-                        paperPresetType = selectedRatio.preset as string;
-
-                        presetWidth = undefined;
-                        presetHeight = undefined;
-                        presetUnit = undefined;
-                    }
+                if (selectedPreset === "CUSTOM") {
+                    realWorldWidth = parseFloat(customWidth) || 21.0;
+                    realWorldHeight = parseFloat(customHeight) || 29.7;
+                } else {
+                    realWorldWidth = selectedPaper?.cmWidth || 21.0;
+                    realWorldHeight = selectedPaper?.cmHeight || 29.7;
                 }
 
-                // For CUSTOM preset, use user's input values
-                if (selectedPreset === "CUSTOM" && customWidth && customHeight) {
-                    realWorldWidth = customWidth;
-                    realWorldHeight = customHeight;
-                    realWorldUnit = customUnit;
-                    paperPresetType = "CUSTOM";
-
-                    presetWidth = customWidth;
-                    presetHeight = customHeight;
-                    presetUnit = customUnit;
-                }
-
-                // Dispatch image with complete metadata including real-world dimensions
+                // Dispatch image with complete metadata
                 dispatch(setImage({
                     uri: asset.uri,
                     source: source,
 
-                    // Internal dimensions (actual from image picker - always in pixels)
                     width: asset.width,
                     height: asset.height,
-                    unit: 'px' as const,
+                    unit: 'px',
 
-                    // Real-world paper dimensions for grid calculation
                     realWorldWidth: realWorldWidth,
                     realWorldHeight: realWorldHeight,
-                    realWorldUnit: realWorldUnit,
-                    paperPresetType: paperPresetType as any,
+                    realWorldUnit: 'cm',
+                    paperPresetType: selectedPreset,
 
-                    // Preset dimensions (for UI display)
-                    presetWidth: presetWidth,
-                    presetHeight: presetHeight,
-                    presetUnit: presetUnit,
+                    presetWidth: realWorldWidth,
+                    presetHeight: realWorldHeight,
+                    presetUnit: 'cm',
 
-                    // File metadata
                     format: extractImageFormat(asset.uri, asset.mimeType),
                     mimeType: asset.mimeType,
                     fileSize: asset.fileSize,
                     fileName: extractFileName(asset.uri || asset.fileName || 'unknown'),
                 }));
 
-                // Set original image ratio for editing
-                if (asset.width && asset.height) {
-                    dispatch(setOriginalImageRatio(asset.width / asset.height));
-                }
-
-                // ========================================
-                // NEW: TRIGGER NAVIGATION/REDIRECT
-                // ========================================
-                // Call the callback to redirect to next page/tab
                 if (onImageSelected) {
                     onImageSelected();
                 }
 
-                // Check if advanced cropping is needed
-                const needsAdvancedCrop = onAdvancedCrop && !['SQUARE'].includes(selectedPreset);
+                // Optional: trigger advanced crop for non-A4 sizes
+                const needsAdvancedCrop = onAdvancedCrop && selectedPaper?.preset !== 'A4';
 
                 if (needsAdvancedCrop) {
                     onAdvancedCrop(asset.uri);
@@ -534,34 +458,15 @@ const ImageSourceOptions = ({
         }
     };
 
-    // ========================================
-    // DISPLAY HELPERS
-    // ========================================
-
-    const getSelectedRatioDisplayText = () => {
-        if (selectedPreset === "CUSTOM") {
-            if (customWidth && customHeight) {
-                return `Custom (${customWidth}×${customHeight}${customUnit})`;
-            }
-            return "Custom - Set dimensions";
-        }
-        if (selectedRatio) {
-            if (selectedRatio.unit === 'mm' && selectedRatio.mmWidth && selectedRatio.mmHeight) {
-                return `${selectedRatio.label} (${selectedRatio.mmWidth}×${selectedRatio.mmHeight}mm)`;
-            } else {
-                return `${selectedRatio.label} - ${selectedRatio.description}`;
-            }
-        }
-        return 'Select Ratio';
-    };
 
     // ========================================
     // RENDER METHODS
     // ========================================
 
+
     return (
         <View>
-            {/* RATIO SELECTION MODAL */}
+            {/* PAPER SIZE SELECTION MODAL */}
             <Modal
                 animationType="slide"
                 transparent={true}
@@ -572,165 +477,131 @@ const ImageSourceOptions = ({
                     <View style={styles.modalContent}>
                         {/* Modal Header */}
                         <View style={styles.headerContainer}>
-                            <Text style={styles.headerTitle}>Select Aspect Ratio</Text>
+                            <Text style={styles.headerTitle}>Select Paper Size</Text>
                             <Text style={styles.headerSubtitle}>New Project</Text>
                             <Pressable onPress={handleCloseSelectRatioModal} style={styles.closeButton}>
                                 <MaterialIcons name="close" size={24} color="#fff" />
                             </Pressable>
                         </View>
 
-                        {/* Ratio Picker Section */}
-                        <View style={styles.pickerContainer}>
-                            <Text style={styles.label}>Aspect Ratio</Text>
 
-                            <Pressable
-                                style={styles.pickerButton}
-                                onPress={() => setShowRatioPicker(!showRatioPicker)}
-                            >
-                                <View style={styles.pickerButtonContent}>
-                                    <Text style={styles.pickerButtonText}>
-                                        {getSelectedRatioDisplayText()}
-                                    </Text>
-                                    <MaterialIcons
-                                        name={showRatioPicker ? "expand-less" : "expand-more"}
-                                        size={24}
-                                        color="#007AFF"
-                                    />
-                                </View>
-                            </Pressable>
+                        <ScrollView keyboardShouldPersistTaps="handled">
+                            {/* Paper Size Picker Section */}
+                            <View style={styles.pickerContainer}>
+                                <Text style={styles.label}>Paper Size (cm)</Text>
 
-                            {showRatioPicker && (
-                                <View style={styles.dropdownContainer}>
-                                    <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
-                                        {ASPECT_RATIOS.map((ratio) => (
-                                            <Pressable
-                                                key={ratio.preset}
-                                                style={[
-                                                    styles.dropdownItem,
-                                                    selectedPreset === ratio.preset && styles.dropdownItemSelected
-                                                ]}
-                                                onPress={() => handleRatioChange(ratio.preset)}
-                                            >
-                                                <View style={styles.dropdownItemContent}>
-                                                    <Text style={[
-                                                        styles.dropdownItemLabel,
-                                                        selectedPreset === ratio.preset && styles.dropdownItemLabelSelected
-                                                    ]}>
-                                                        {ratio.label}
-                                                    </Text>
-                                                    <Text style={[
-                                                        styles.dropdownItemDesc,
-                                                        selectedPreset === ratio.preset && styles.dropdownItemDescSelected
-                                                    ]}>
-                                                        {ratio.description}
-                                                        {ratio.unit === 'mm' && ratio.mmWidth && ratio.mmHeight &&
-                                                            ` • ${ratio.mmWidth}×${ratio.mmHeight}mm`
-                                                        }
-                                                    </Text>
-                                                </View>
-                                                {selectedPreset === ratio.preset && (
-                                                    <MaterialIcons name="check" size={20} color="#007AFF" />
-                                                )}
-                                            </Pressable>
-                                        ))}
-                                    </ScrollView>
-                                </View>
-                            )}
-                        </View>
-
-                        {/* Custom Dimensions Input */}
-                        {selectedPreset === "CUSTOM" && (
-                            <View style={styles.customDimensionsContainer}>
-                                <Text style={styles.customLabel}>Custom Dimensions</Text>
-
-                                <View style={styles.dimensionsRow}>
-                                    <Text style={styles.sizeLabel}>Size:</Text>
-
-                                    <View style={styles.inputGroup}>
-                                        <TextInput
-                                            style={styles.dimensionInput}
-                                            value={customWidthInput}
-                                            onChangeText={handleCustomWidthChange}
-                                            placeholder="Width"
-                                            placeholderTextColor="#888"
-                                            keyboardType="numeric"
-                                        />
-                                    </View>
-
-                                    <Text style={styles.xText}>×</Text>
-
-                                    <View style={styles.inputGroup}>
-                                        <TextInput
-                                            style={styles.dimensionInput}
-                                            value={customHeightInput}
-                                            onChangeText={handleCustomHeightChange}
-                                            placeholder="Height"
-                                            placeholderTextColor="#888"
-                                            keyboardType="numeric"
-                                        />
-                                    </View>
-
-                                    <Pressable
-                                        style={styles.unitButton}
-                                        onPress={() => setShowUnitPicker(!showUnitPicker)}
-                                    >
-                                        <Text style={styles.unitButtonText}>{customUnit}</Text>
+                                <Pressable
+                                    style={styles.pickerButton}
+                                    onPress={() => setShowPaperPicker(!showPaperPicker)}
+                                >
+                                    <View style={styles.pickerButtonContent}>
+                                        <Text style={styles.pickerButtonText}>
+                                            {getSelectedPaperDisplayText()}
+                                        </Text>
                                         <MaterialIcons
-                                            name={showUnitPicker ? "expand-less" : "expand-more"}
-                                            size={16}
+                                            name={showPaperPicker ? "expand-less" : "expand-more"}
+                                            size={24}
                                             color="#007AFF"
                                         />
-                                    </Pressable>
-                                </View>
+                                    </View>
+                                </Pressable>
 
-                                {showUnitPicker && (
-                                    <View style={styles.unitDropdown}>
-                                        <ScrollView style={styles.unitScrollView} nestedScrollEnabled>
-                                            {UNITS.map((unit) => (
+                                {showPaperPicker && (
+                                    <View style={styles.dropdownContainer}>
+                                        <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
+                                            {ASPECT_RATIOS.map((paper) => (
                                                 <Pressable
-                                                    key={unit.value}
+                                                    key={paper.preset}
                                                     style={[
-                                                        styles.unitItem,
-                                                        customUnit === unit.value && styles.unitItemSelected
+                                                        styles.dropdownItem,
+                                                        selectedPreset === paper.preset && styles.dropdownItemSelected
                                                     ]}
-                                                    onPress={() => handleUnitChange(unit.value)}
+                                                    onPress={() => handlePaperChange(paper.preset)}
                                                 >
-                                                    <Text style={[
-                                                        styles.unitItemText,
-                                                        customUnit === unit.value && styles.unitItemTextSelected
-                                                    ]}>
-                                                        {unit.label}
-                                                    </Text>
-                                                    {customUnit === unit.value && (
-                                                        <MaterialIcons name="check" size={16} color="#007AFF" />
+                                                    <View style={styles.dropdownItemContent}>
+                                                        <Text style={[
+                                                            styles.dropdownItemLabel,
+                                                            selectedPreset === paper.preset && styles.dropdownItemLabelSelected
+                                                        ]}>
+                                                            {paper.label}
+                                                        </Text>
+                                                        <Text style={[
+                                                            styles.dropdownItemDesc,
+                                                            selectedPreset === paper.preset && styles.dropdownItemDescSelected
+                                                        ]}>
+                                                            {paper.description}
+                                                        </Text>
+                                                    </View>
+                                                    {selectedPreset === paper.preset && (
+                                                        <MaterialIcons name="check" size={20} color="#007AFF" />
                                                     )}
                                                 </Pressable>
                                             ))}
                                         </ScrollView>
-                                    </View>
-                                )}
 
-                                {customWidth && customHeight && (
-                                    <View style={styles.calculatedRatioContainer}>
-                                        <Text style={styles.calculatedRatioLabel}>Calculated Ratio:</Text>
-                                        <Text style={styles.calculatedRatioValue}>
-                                            {(customWidth / customHeight).toFixed(3)}:1
-                                        </Text>
+                                        {/* Custom input fields for custom selection */}
+                                        {selectedPreset === "CUSTOM" && (
+                                            <View style={styles.customInputFields}>
+                                                <Text style={styles.customInputsLabel}>Enter Custom Dimensions</Text>
+
+                                                <View style={styles.customInputRow}>
+                                                    <Text style={styles.customInputLabel}>Width (cm):</Text>
+                                                    <TextInput
+                                                        style={styles.customInput}
+                                                        keyboardType="decimal-pad"
+                                                        value={customWidth}
+                                                        onChangeText={handleCustomWidthChange}
+                                                        placeholder="Width"
+                                                        maxLength={8}
+                                                        placeholderTextColor="#888"
+                                                    />
+                                                </View>
+
+                                                <View style={styles.customInputRow}>
+                                                    <Text style={styles.customInputLabel}>Height (cm):</Text>
+                                                    <TextInput
+                                                        style={styles.customInput}
+                                                        keyboardType="decimal-pad"
+                                                        value={customHeight}
+                                                        onChangeText={handleCustomHeightChange}
+                                                        placeholder="Height"
+                                                        maxLength={8}
+                                                        placeholderTextColor="#888"
+                                                    />
+                                                </View>
+
+                                                {customDimensionError ? (
+                                                    <View style={styles.errorContainer}>
+                                                        <MaterialIcons name="error" size={16} color="#FF3B30" />
+                                                        <Text style={styles.errorText}>{customDimensionError}</Text>
+                                                    </View>
+                                                ) : null}
+
+                                                <Text style={styles.customInputHint}>
+                                                    • Max dimensions: 1000×1000 cm
+                                                </Text>
+                                            </View>
+                                        )}
                                     </View>
                                 )}
                             </View>
-                        )}
+                        </ScrollView>
 
-                        {/* Selected ratio display for non-custom ratios */}
-                        {selectedRatio && selectedPreset !== "CUSTOM" && (
+                        {/* Selected paper display */}
+                        {selectedPaper && (
                             <View style={styles.selectedRatioDisplay}>
-                                <MaterialIcons name="check" size={20} color="#007AFF" />
-                                <Text style={styles.selectedRatioText}>
-                                    Selected: {selectedRatio.label}
-                                </Text>
-                                <Text style={styles.selectedRatioDesc}>
-                                    {selectedRatio.description}
-                                </Text>
+                                <MaterialIcons name="check-circle" size={20} color="#007AFF" />
+                                <View style={styles.selectedRatioTextContainer}>
+                                    <Text style={styles.selectedRatioText}>
+                                        Selected: {selectedPaper.label}
+                                    </Text>
+                                    <Text style={styles.selectedRatioDesc}>
+                                        {selectedPreset === "CUSTOM"
+                                            ? `${parseFloat(customWidth) || 21.0}×${parseFloat(customHeight) || 29.7} cm`
+                                            : selectedPaper.description
+                                        }
+                                    </Text>
+                                </View>
                             </View>
                         )}
 
@@ -761,10 +632,10 @@ const ImageSourceOptions = ({
                         {/* Info footer */}
                         <View style={styles.infoFooter}>
                             <Text style={styles.infoText}>
-                                Choose Your Preferred Aspect Ratio for Image Cropping
+                                Choose Your Paper Size for Image Grid Overlay
                             </Text>
                             <Text style={styles.infoText}>
-                                Paper sizes are shown in millimeters (mm)
+                                All sizes in centimeters (cm)
                             </Text>
                         </View>
                     </View>
@@ -795,18 +666,14 @@ const ImageSourceOptions = ({
                             <View style={styles.ratioDisplay}>
                                 <MaterialIcons name="crop" size={20} color="#007AFF" />
                                 <Text style={styles.ratioDisplayText}>
-                                    {selectedPreset === "CUSTOM" && customWidth && customHeight
-                                        ? `Custom: ${customWidth}×${customHeight}${customUnit}`
-                                        : selectedRatio?.unit === 'mm' && selectedRatio?.mmWidth && selectedRatio?.mmHeight
-                                            ? `${selectedRatio?.label}: ${selectedRatio.mmWidth}×${selectedRatio.mmHeight}mm`
-                                            : `Crop: ${selectedRatio?.label || 'Unknown'}`
+                                    {selectedPaper
+                                        ? (selectedPreset === "CUSTOM"
+                                            ? `Custom: ${parseFloat(customWidth) || 21.0}×${parseFloat(customHeight) || 29.7} cm`
+                                            : `${selectedPaper.label}: ${selectedPaper.cmWidth}×${selectedPaper.cmHeight} cm`
+                                        )
+                                        : 'No paper size selected'
                                     }
                                 </Text>
-                                {ratioValue && (
-                                    <Text style={styles.ratioDisplayDescription}>
-                                        Ratio: {ratioValue.toFixed(3)}:1
-                                    </Text>
-                                )}
                             </View>
                         </View>
 
@@ -930,12 +797,13 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     dropdownContainer: {
+        // position: 'relative',
         marginTop: 4,
         borderWidth: 1,
         borderColor: "#444",
         borderRadius: 8,
         backgroundColor: "#2c2c2e",
-        maxHeight: 300,
+        maxHeight: 350,
     },
     dropdownScroll: {
         maxHeight: 280,
@@ -971,117 +839,67 @@ const styles = StyleSheet.create({
         color: '#007AFF',
         opacity: 0.8,
     },
-    customDimensionsContainer: {
-        padding: 20,
-        backgroundColor: "#1c1c1e",
-        marginHorizontal: 16,
-        marginBottom: 16,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: "#007AFF",
+    customInputFields: {
+        // position: 'absolute',
+        // top: 0,
+        // left: 0,
+        // right: 0,
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderTopWidth: 1,
+        borderTopColor: '#444',
+        backgroundColor: 'rgba(0, 122, 255, 0.05)',
     },
-    customLabel: {
-        fontSize: 16,
-        fontWeight: "600",
-        color: "#007AFF",
+    customInputsLabel: {
+        color: '#007AFF',
+        fontSize: 14,
+        fontWeight: '600',
         marginBottom: 12,
     },
-    dimensionsRow: {
+    customInputRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
+        marginBottom: 10,
     },
-    sizeLabel: {
+    customInputLabel: {
+        width: 90,
         color: '#fff',
         fontSize: 14,
         fontWeight: '500',
     },
-    inputGroup: {
+    customInput: {
         flex: 1,
-        marginHorizontal: 8,
-    },
-    dimensionInput: {
-        borderWidth: 1,
-        borderColor: "#444",
+        height: 38,
         borderRadius: 6,
-        backgroundColor: "#2c2c2e",
-        color: '#fff',
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        fontSize: 16,
-        textAlign: 'center',
-    },
-    xText: {
+        borderWidth: 1,
+        borderColor: '#007AFF',
         color: '#fff',
         fontSize: 16,
-        marginHorizontal: 8,
-    },
-    unitButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        borderWidth: 1,
-        borderColor: "#444",
-        borderRadius: 6,
         backgroundColor: "#2c2c2e",
         paddingHorizontal: 12,
-        paddingVertical: 8,
-        minWidth: 60,
     },
-    unitButtonText: {
-        color: '#007AFF',
-        fontSize: 14,
-        fontWeight: '600',
-        marginRight: 4,
-    },
-    unitDropdown: {
-        marginTop: 8,
-        borderWidth: 1,
-        borderColor: "#444",
-        borderRadius: 6,
-        backgroundColor: "#2c2c2e",
-        maxHeight: 120,
-    },
-    unitScrollView: {
-        maxHeight: 100,
-    },
-    unitItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderBottomWidth: 1,
-        borderBottomColor: '#444',
-    },
-    unitItemSelected: {
-        backgroundColor: 'rgba(0, 122, 255, 0.1)',
-    },
-    unitItemText: {
-        color: '#fff',
-        fontSize: 14,
-    },
-    unitItemTextSelected: {
-        color: '#007AFF',
-        fontWeight: '600',
-    },
-    calculatedRatioContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginTop: 12,
-        paddingTop: 12,
-        borderTopWidth: 1,
-        borderTopColor: '#444',
-    },
-    calculatedRatioLabel: {
-        color: '#aaa',
+    customInputHint: {
+        color: '#888',
         fontSize: 12,
-        marginRight: 8,
+        marginTop: 8,
+        fontStyle: 'italic',
     },
-    calculatedRatioValue: {
-        color: '#007AFF',
-        fontSize: 14,
-        fontWeight: '600',
+    errorContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(255, 59, 48, 0.1)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 59, 48, 0.3)',
+        borderRadius: 6,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        marginTop: 8,
+    },
+    errorText: {
+        color: '#FF3B30',
+        fontSize: 12,
+        marginLeft: 8,
+        flex: 1,
     },
     selectedRatioDisplay: {
         flexDirection: 'row',
@@ -1092,16 +910,19 @@ const styles = StyleSheet.create({
         borderTopWidth: 1,
         borderTopColor: '#3a3d41',
     },
+    selectedRatioTextContainer: {
+        marginLeft: 8,
+        flex: 1,
+    },
     selectedRatioText: {
         color: '#007AFF',
         fontSize: 16,
         fontWeight: '600',
-        marginLeft: 8,
     },
     selectedRatioDesc: {
         color: '#007AFF',
         fontSize: 12,
-        marginLeft: 8,
+        marginTop: 2,
         opacity: 0.8,
     },
     actionContainer: {
@@ -1193,12 +1014,6 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
         marginLeft: 8,
-    },
-    ratioDisplayDescription: {
-        color: '#007AFF',
-        fontSize: 12,
-        marginLeft: 8,
-        opacity: 0.8,
     },
     loadingContainer: {
         flex: 1,

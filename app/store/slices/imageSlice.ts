@@ -1,20 +1,25 @@
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 import { Image } from "react-native";
 
+
 // Import the default image from assets
 const DefaultImage = require("@/assets/images/background-image.png");
 
-// Define dimension unit type
-type DimensionUnit = "px" | "mm" | "cm" | "m" | "inch" | "ft";
 
-// These paper size types are for preset support if you want to expand
-type PaperPreset = "A0" | "A1" | "A2" | "A3" | "A4" | "A5" | "custom";
+// Define dimension unit type - keeping px for internal use, but real-world is cm only
+type DimensionUnit = "px" | "cm";
+
+
+// Paper size types - A0 to A5 presets + CUSTOM
+type PaperPreset = "A0" | "A1" | "A2" | "A3" | "A4" | "A5" | "CUSTOM";
+
 
 interface ImageState {
     currentImage: string;
     source: "camera" | "gallery" | "default";
     isLoading: boolean;
     error: string | null;
+
 
     // Internal dimensions (as imported, always in px)
     width?: number;
@@ -25,18 +30,24 @@ interface ImageState {
     fileSize?: number;
     fileName?: string;
 
-    // Real-world/paper data for accurate overlays:
-    // These must be set by the user/preset after image load if not from a scanner!
-    realWorldWidth?: number; // e.g. 210 for A4, in real units
-    realWorldHeight?: number;
-    realWorldUnit?: DimensionUnit; // "mm", "cm", etc.
-    paperPresetType?: PaperPreset; // Optional for paper preset recall
 
-    // Preset for UI display (can be real world dimensions or user's chosen overlay area)
+    // Real-world/paper data for accurate overlays (always in cm)
+    realWorldWidth?: number;
+    realWorldHeight?: number;
+    realWorldUnit: "cm"; // Always cm now
+    paperPresetType?: PaperPreset;
+
+
+    // Preset for UI display (always in cm)
     presetWidth?: number;
     presetHeight?: number;
-    presetUnit: DimensionUnit;
+    presetUnit: "cm"; // Always cm now
+
+
+    // MIME type for reference
+    mimeType?: string;
 }
+
 
 // Utility function to extract format from URI or MIME type
 function extractImageFormat(uri: string, mimeType?: string): string {
@@ -67,6 +78,7 @@ function extractImageFormat(uri: string, mimeType?: string): string {
     return 'unknown';
 }
 
+
 // Utility function to extract filename from URI
 function extractFileName(uri: string): string {
     try {
@@ -79,20 +91,26 @@ function extractFileName(uri: string): string {
     }
 }
 
-// Utility function to convert between dimension units (NOTE: This ignores DPI, used only for UI)
+
+// Simplified conversion - only px to cm and cm to px
 function convertDimensionUnit(value: number, fromUnit: DimensionUnit, toUnit: DimensionUnit): number {
     if (fromUnit === toUnit) return value;
-    const toPixels: Record<DimensionUnit, number> = {
-        px: 1,
-        mm: 3.7795275591, // 96 DPI standard
-        cm: 37.795275591,
-        m: 3779.5275591,
-        inch: 96,
-        ft: 1152,
-    };
-    const pixels = value * toPixels[fromUnit];
-    return pixels / toPixels[toUnit];
+
+
+    // Conversion factors (96 DPI standard)
+    const CM_TO_PX = 37.795275591;
+
+
+    if (fromUnit === 'px' && toUnit === 'cm') {
+        return value / CM_TO_PX;
+    } else if (fromUnit === 'cm' && toUnit === 'px') {
+        return value * CM_TO_PX;
+    }
+
+
+    return value;
 }
+
 
 // Utility function to get formatted dimension string
 function formatDimension(value?: number, unit?: DimensionUnit): string {
@@ -100,12 +118,14 @@ function formatDimension(value?: number, unit?: DimensionUnit): string {
     return `${value.toFixed(unit === 'px' ? 0 : 2)} ${unit}`;
 }
 
+
 // Utility functions
 function isValidUri(uri: string): boolean {
     if (!uri || typeof uri !== 'string') return false;
     const uriPattern = /^(https?:\/\/|file:\/\/|data:|\/|\.\/)/;
     return uriPattern.test(uri) || uri.startsWith('ph://') || uri.startsWith('content://');
 }
+
 
 function getDefaultImageUri(): string {
     try {
@@ -134,6 +154,7 @@ function getDefaultImageUri(): string {
     }
 }
 
+
 let defaultImageUri: string | null = null;
 function getOrInitDefaultUri(): string {
     if (defaultImageUri === null) {
@@ -141,6 +162,7 @@ function getOrInitDefaultUri(): string {
     }
     return defaultImageUri;
 }
+
 
 const initialState: ImageState = {
     currentImage: getOrInitDefaultUri(),
@@ -156,30 +178,36 @@ const initialState: ImageState = {
     fileName: undefined,
     realWorldWidth: undefined,
     realWorldHeight: undefined,
-    realWorldUnit: undefined,
+    realWorldUnit: "cm",
     paperPresetType: undefined,
     presetWidth: undefined,
     presetHeight: undefined,
-    presetUnit: "px"
+    presetUnit: "cm",
+    mimeType: undefined,
 };
+
 
 interface SetImagePayload {
     uri: string;
     source: "camera" | "gallery";
 
+
     width?: number;
     height?: number;
     unit?: DimensionUnit;
 
-    // These are for real-world correspondence
+
+    // Real-world correspondence (always in cm)
     realWorldWidth?: number;
     realWorldHeight?: number;
-    realWorldUnit?: DimensionUnit;
-    paperPresetType?: PaperPreset;
+    realWorldUnit?: "cm";
+    paperPresetType?: PaperPreset; // Now includes "CUSTOM"
+
 
     presetWidth?: number;
     presetHeight?: number;
-    presetUnit?: DimensionUnit;
+    presetUnit?: "cm";
+
 
     // Other metadata
     format?: string;
@@ -187,6 +215,7 @@ interface SetImagePayload {
     fileSize?: number;
     fileName?: string;
 }
+
 
 const imageSlice = createSlice({
     name: "image",
@@ -208,22 +237,25 @@ const imageSlice = createSlice({
                 fileName,
                 realWorldWidth,
                 realWorldHeight,
-                realWorldUnit,
+                realWorldUnit = "cm",
                 paperPresetType,
                 presetWidth,
                 presetHeight,
-                presetUnit = "px",
+                presetUnit = "cm",
             } = action.payload;
+
 
             if (!isValidUri(uri)) {
                 state.error = "Invalid image URI provided";
                 return;
             }
 
+
             state.currentImage = uri;
             state.source = source;
             state.error = null;
             state.isLoading = false;
+
 
             state.width = width;
             state.height = height;
@@ -232,16 +264,20 @@ const imageSlice = createSlice({
             state.format = format || extractImageFormat(uri, mimeType);
             state.fileSize = fileSize;
             state.fileName = fileName || extractFileName(uri);
+            state.mimeType = mimeType;
+
 
             state.realWorldWidth = realWorldWidth;
             state.realWorldHeight = realWorldHeight;
-            state.realWorldUnit = realWorldUnit;
-            state.paperPresetType = paperPresetType;
+            state.realWorldUnit = "cm"; // Always cm
+            state.paperPresetType = paperPresetType; // Can be A0-A5 or CUSTOM
 
-            state.presetWidth = presetWidth ?? width;
-            state.presetHeight = presetHeight ?? height;
-            state.presetUnit = presetUnit;
+
+            state.presetWidth = presetWidth ?? realWorldWidth;
+            state.presetHeight = presetHeight ?? realWorldHeight;
+            state.presetUnit = "cm"; // Always cm
         },
+
 
         setImageMetadata: (
             state,
@@ -251,22 +287,22 @@ const imageSlice = createSlice({
                 unit?: DimensionUnit;
                 realWorldWidth?: number;
                 realWorldHeight?: number;
-                realWorldUnit?: DimensionUnit;
                 paperPresetType?: PaperPreset;
                 presetWidth?: number;
                 presetHeight?: number;
-                presetUnit?: DimensionUnit;
                 format?: string;
                 fileSize?: number;
                 fileName?: string;
+                mimeType?: string;
             }>
         ) => {
             const {
                 width, height, unit,
-                realWorldWidth, realWorldHeight, realWorldUnit, paperPresetType,
-                presetWidth, presetHeight, presetUnit,
-                format, fileSize, fileName
+                realWorldWidth, realWorldHeight, paperPresetType,
+                presetWidth, presetHeight,
+                format, fileSize, fileName, mimeType
             } = action.payload;
+
 
             if (width !== undefined) state.width = width;
             if (height !== undefined) state.height = height;
@@ -274,66 +310,57 @@ const imageSlice = createSlice({
             if (format !== undefined) state.format = format;
             if (fileSize !== undefined) state.fileSize = fileSize;
             if (fileName !== undefined) state.fileName = fileName;
+            if (mimeType !== undefined) state.mimeType = mimeType;
+
 
             if (realWorldWidth !== undefined) state.realWorldWidth = realWorldWidth;
             if (realWorldHeight !== undefined) state.realWorldHeight = realWorldHeight;
-            if (realWorldUnit !== undefined) state.realWorldUnit = realWorldUnit;
             if (paperPresetType !== undefined) state.paperPresetType = paperPresetType;
+
 
             if (presetWidth !== undefined) state.presetWidth = presetWidth;
             if (presetHeight !== undefined) state.presetHeight = presetHeight;
-            if (presetUnit !== undefined) state.presetUnit = presetUnit;
+
 
             if (state.width && state.height) {
                 state.aspectRatio = state.width / state.height;
             }
         },
 
-        setDimensionUnits: (
-            state,
-            action: PayloadAction<{ unit?: DimensionUnit; presetUnit?: DimensionUnit }>
-        ) => {
-            const { unit, presetUnit } = action.payload;
-            if (unit !== undefined) state.unit = unit;
-            if (presetUnit !== undefined) state.presetUnit = presetUnit;
-        },
-
-        convertDimensions: (
-            state,
-            action: PayloadAction<{ toUnit: DimensionUnit; convertPreset?: boolean }>
-        ) => {
-            const { toUnit, convertPreset = false } = action.payload;
-            if (state.width !== undefined && state.unit !== toUnit) {
-                state.width = convertDimensionUnit(state.width, state.unit, toUnit);
-            }
-            if (state.height !== undefined && state.unit !== toUnit) {
-                state.height = convertDimensionUnit(state.height, state.unit, toUnit);
-            }
-            state.unit = toUnit;
-            if (convertPreset) {
-                if (state.presetWidth !== undefined && state.presetUnit !== toUnit) {
-                    state.presetWidth = convertDimensionUnit(state.presetWidth, state.presetUnit, toUnit);
-                }
-                if (state.presetHeight !== undefined && state.presetUnit !== toUnit) {
-                    state.presetHeight = convertDimensionUnit(state.presetHeight, state.presetUnit, toUnit);
-                }
-                state.presetUnit = toUnit;
-            }
-        },
 
         setPresetDimensions: (
             state,
             action: PayloadAction<{
                 presetWidth?: number;
                 presetHeight?: number;
-                presetUnit?: DimensionUnit;
+                paperPresetType?: PaperPreset;
             }>
         ) => {
-            const { presetWidth, presetHeight, presetUnit } = action.payload;
+            const { presetWidth, presetHeight, paperPresetType } = action.payload;
             if (presetWidth !== undefined) state.presetWidth = presetWidth;
             if (presetHeight !== undefined) state.presetHeight = presetHeight;
-            if (presetUnit !== undefined) state.presetUnit = presetUnit;
+            if (paperPresetType !== undefined) state.paperPresetType = paperPresetType;
         },
+
+
+        updateRealWorldDimensions: (
+            state,
+            action: PayloadAction<{
+                realWorldWidth?: number;
+                realWorldHeight?: number;
+                paperPresetType?: PaperPreset;
+            }>
+        ) => {
+            const { realWorldWidth, realWorldHeight, paperPresetType } = action.payload;
+            if (realWorldWidth !== undefined) state.realWorldWidth = realWorldWidth;
+            if (realWorldHeight !== undefined) state.realWorldHeight = realWorldHeight;
+            if (paperPresetType !== undefined) state.paperPresetType = paperPresetType;
+
+            // Also update preset if real-world changes
+            if (realWorldWidth !== undefined) state.presetWidth = realWorldWidth;
+            if (realWorldHeight !== undefined) state.presetHeight = realWorldHeight;
+        },
+
 
         setImageLoading: (state, action: PayloadAction<boolean>) => {
             state.isLoading = action.payload;
@@ -342,10 +369,12 @@ const imageSlice = createSlice({
             }
         },
 
+
         setImageError: (state, action: PayloadAction<string>) => {
             state.error = action.payload;
             state.isLoading = false;
         },
+
 
         clearImage: (state) => {
             state.currentImage = getOrInitDefaultUri();
@@ -359,18 +388,21 @@ const imageSlice = createSlice({
             state.format = undefined;
             state.fileSize = undefined;
             state.fileName = undefined;
+            state.mimeType = undefined;
             state.realWorldWidth = undefined;
             state.realWorldHeight = undefined;
-            state.realWorldUnit = undefined;
+            state.realWorldUnit = "cm";
             state.paperPresetType = undefined;
             state.presetWidth = undefined;
             state.presetHeight = undefined;
-            state.presetUnit = "px";
+            state.presetUnit = "cm";
         },
+
 
         clearImageError: (state) => {
             state.error = null;
         },
+
 
         retryDefaultImage: (state) => {
             try {
@@ -385,6 +417,7 @@ const imageSlice = createSlice({
             }
         },
 
+
         validateCurrentImage: (state) => {
             if (!isValidUri(state.currentImage)) {
                 state.error = "Current image URI is invalid";
@@ -397,27 +430,29 @@ const imageSlice = createSlice({
                 state.format = undefined;
                 state.fileSize = undefined;
                 state.fileName = undefined;
+                state.mimeType = undefined;
                 state.realWorldWidth = undefined;
                 state.realWorldHeight = undefined;
-                state.realWorldUnit = undefined;
+                state.realWorldUnit = "cm";
                 state.paperPresetType = undefined;
                 state.presetWidth = undefined;
                 state.presetHeight = undefined;
-                state.presetUnit = "px";
+                state.presetUnit = "cm";
             }
         },
+
 
         replaceImage: (
             state,
             action: PayloadAction<SetImagePayload>
         ) => {
-            // identical to setImage
             imageSlice.caseReducers.setImage(state, action);
         },
     },
 });
 
-// Selectors (same as before, but extended with real-world info)
+
+// Selectors
 export const selectCurrentImage = (state: { image: ImageState }) => state.image.currentImage;
 export const selectImageSource = (state: { image: ImageState }) => state.image.source;
 export const selectImageLoading = (state: { image: ImageState }) => state.image.isLoading;
@@ -429,31 +464,48 @@ export const selectImageAspectRatio = (state: { image: ImageState }) => state.im
 export const selectImageFormat = (state: { image: ImageState }) => state.image.format;
 export const selectImageFileSize = (state: { image: ImageState }) => state.image.fileSize;
 export const selectImageFileName = (state: { image: ImageState }) => state.image.fileName;
+export const selectImageMimeType = (state: { image: ImageState }) => state.image.mimeType;
 
-// Real-world paper dimensions
+
+// Real-world paper dimensions (always in cm)
 export const selectPaperSize = (state: { image: ImageState }) => ({
     realWorldWidth: state.image.realWorldWidth,
     realWorldHeight: state.image.realWorldHeight,
     realWorldUnit: state.image.realWorldUnit,
     paperPresetType: state.image.paperPresetType,
+    isCustom: state.image.paperPresetType === "CUSTOM",
 });
 
-// Preset dimensions (for UI display)
+
+// Preset dimensions (always in cm)
 export const selectImagePresetWidth = (state: { image: ImageState }) => state.image.presetWidth;
 export const selectImagePresetHeight = (state: { image: ImageState }) => state.image.presetHeight;
 export const selectImagePresetUnit = (state: { image: ImageState }) => state.image.presetUnit;
 
+
 export const selectFormattedWidth = (state: { image: ImageState }) =>
     formatDimension(state.image.width, state.image.unit);
+
 
 export const selectFormattedHeight = (state: { image: ImageState }) =>
     formatDimension(state.image.height, state.image.unit);
 
+
 export const selectFormattedPresetWidth = (state: { image: ImageState }) =>
-    formatDimension(state.image.presetWidth, state.image.presetUnit);
+    formatDimension(state.image.presetWidth, "cm");
+
 
 export const selectFormattedPresetHeight = (state: { image: ImageState }) =>
-    formatDimension(state.image.presetHeight, state.image.presetUnit);
+    formatDimension(state.image.presetHeight, "cm");
+
+
+export const selectFormattedRealWorldWidth = (state: { image: ImageState }) =>
+    formatDimension(state.image.realWorldWidth, "cm");
+
+
+export const selectFormattedRealWorldHeight = (state: { image: ImageState }) =>
+    formatDimension(state.image.realWorldHeight, "cm");
+
 
 export const selectFormattedDimensions = (state: { image: ImageState }) => ({
     width: formatDimension(state.image.width, state.image.unit),
@@ -461,20 +513,26 @@ export const selectFormattedDimensions = (state: { image: ImageState }) => ({
     widthRaw: state.image.width,
     heightRaw: state.image.height,
     unit: state.image.unit,
-    realWorldWidth: formatDimension(state.image.realWorldWidth, state.image.realWorldUnit),
-    realWorldHeight: formatDimension(state.image.realWorldHeight, state.image.realWorldUnit),
-    realWorldUnit: state.image.realWorldUnit,
-    presetWidth: formatDimension(state.image.presetWidth, state.image.presetUnit),
-    presetHeight: formatDimension(state.image.presetHeight, state.image.presetUnit),
+    realWorldWidth: formatDimension(state.image.realWorldWidth, "cm"),
+    realWorldHeight: formatDimension(state.image.realWorldHeight, "cm"),
+    realWorldUnit: "cm",
+    presetWidth: formatDimension(state.image.presetWidth, "cm"),
+    presetHeight: formatDimension(state.image.presetHeight, "cm"),
     presetWidthRaw: state.image.presetWidth,
     presetHeightRaw: state.image.presetHeight,
-    presetUnit: state.image.presetUnit,
+    presetUnit: "cm",
+    paperPresetType: state.image.paperPresetType,
+    isCustom: state.image.paperPresetType === "CUSTOM",
 });
+
 
 export const selectHasValidImage = (state: { image: ImageState }) =>
     isValidUri(state.image.currentImage) && !state.image.error;
+
+
 export const selectHasUserImage = (state: { image: ImageState }) =>
     state.image.source === "camera" || state.image.source === "gallery";
+
 
 export const selectImageMetadata = (state: { image: ImageState }) => ({
     width: state.image.width,
@@ -491,7 +549,9 @@ export const selectImageMetadata = (state: { image: ImageState }) => ({
     format: state.image.format,
     fileSize: state.image.fileSize,
     fileName: state.image.fileName,
+    mimeType: state.image.mimeType,
 });
+
 
 export const selectImageWithMeta = (state: { image: ImageState }) => ({
     uri: state.image.currentImage,
@@ -506,6 +566,7 @@ export const selectImageWithMeta = (state: { image: ImageState }) => ({
     realWorldHeight: state.image.realWorldHeight,
     realWorldUnit: state.image.realWorldUnit,
     paperPresetType: state.image.paperPresetType,
+    isCustomPaper: state.image.paperPresetType === "CUSTOM",
     presetWidth: state.image.presetWidth,
     presetHeight: state.image.presetHeight,
     presetUnit: state.image.presetUnit,
@@ -513,13 +574,15 @@ export const selectImageWithMeta = (state: { image: ImageState }) => ({
     format: state.image.format,
     fileSize: state.image.fileSize,
     fileName: state.image.fileName,
+    mimeType: state.image.mimeType,
     formattedWidth: formatDimension(state.image.width, state.image.unit),
     formattedHeight: formatDimension(state.image.height, state.image.unit),
-    formattedPresetWidth: formatDimension(state.image.presetWidth, state.image.presetUnit),
-    formattedPresetHeight: formatDimension(state.image.presetHeight, state.image.presetUnit),
-    formattedRealWorldWidth: formatDimension(state.image.realWorldWidth, state.image.realWorldUnit),
-    formattedRealWorldHeight: formatDimension(state.image.realWorldHeight, state.image.realWorldUnit),
+    formattedPresetWidth: formatDimension(state.image.presetWidth, "cm"),
+    formattedPresetHeight: formatDimension(state.image.presetHeight, "cm"),
+    formattedRealWorldWidth: formatDimension(state.image.realWorldWidth, "cm"),
+    formattedRealWorldHeight: formatDimension(state.image.realWorldHeight, "cm"),
 });
+
 
 export const checkDefaultImageAvailable = (): boolean => {
     try {
@@ -530,12 +593,12 @@ export const checkDefaultImageAvailable = (): boolean => {
     }
 };
 
+
 export const {
     setImage,
     setImageMetadata,
-    setDimensionUnits,
-    convertDimensions,
     setPresetDimensions,
+    updateRealWorldDimensions,
     setImageLoading,
     setImageError,
     clearImage,
@@ -545,8 +608,10 @@ export const {
     replaceImage,
 } = imageSlice.actions;
 
+
 export default imageSlice.reducer;
+
 
 // Type exports for use in components
 export type { ImageState, SetImagePayload, DimensionUnit, PaperPreset };
-export { isValidUri, extractImageFormat, extractFileName, convertDimensionUnit, formatDimension };
+export { isValidUri, extractImageFormat, extractFileName, convertDimensionUnit, formatDimension }

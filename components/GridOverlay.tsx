@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useSelector } from 'react-redux';
 import { RootState } from '@/app/store/store';
 
@@ -14,95 +14,195 @@ const GridOverlay: React.FC<GridOverlayProps> = ({
   containerHeight,
   visible = true,
 }) => {
-  // Get grid configuration from Redux
+  // Get image real-world dimensions (always in cm)
+  const imageData = useSelector((state: RootState) => ({
+    realWorldWidth: state.image.realWorldWidth,
+    realWorldHeight: state.image.realWorldHeight,
+  }));
+
+  // Get grid configuration
   const gridConfig = useSelector((state: RootState) => ({
     isVisible: state.imageEdit.isGridVisible,
-    rows: state.imageEdit.gridRows,
-    cols: state.imageEdit.gridCols,
     strokeColor: state.imageEdit.strokeColor,
     strokeWidth: state.imageEdit.strokeWidth,
     showLabels: state.imageEdit.showLabels,
     labelStyle: state.imageEdit.labelStyle,
     gridMode: state.imageEdit.gridMode,
-    gridCellWidth: state.imageEdit.gridCellWidth,
-    gridCellHeight: state.imageEdit.gridCellHeight,
-    
+    gridCellWidth: state.imageEdit.gridCellWidth,   // in cm
+    gridCellHeight: state.imageEdit.gridCellHeight, // in cm
   }));
 
-  console.log(
-    `🧮 Container Size: ${containerWidth} x ${containerHeight} | Grid Cell: ${gridConfig.gridCellWidth} x ${gridConfig.gridCellHeight}`
-  );
+  const gridCalculation = useMemo(() => {
+    if (
+      !imageData.realWorldWidth ||
+      !imageData.realWorldHeight ||
+      imageData.realWorldWidth <= 0 ||
+      imageData.realWorldHeight <= 0 ||
+      containerWidth <= 0 ||
+      containerHeight <= 0 ||
+      gridConfig.gridCellWidth <= 0 ||
+      gridConfig.gridCellHeight <= 0
+    ) {
+      return {
+        rows: 0,
+        cols: 0,
+        cellWidthPx: 0,
+        cellHeightPx: 0,
+        remainingWidthPx: 0,
+        remainingHeightPx: 0,
+        totalGridWidthPx: 0,
+        totalGridHeightPx: 0,
+        fullImageWidthPx: 0,
+        fullImageHeightPx: 0,
+      };
+    }
 
+    // All dimensions are in cm
+    const imageWidthCm = imageData.realWorldWidth;
+    const imageHeightCm = imageData.realWorldHeight;
 
-  // Don't render if grid is not visible or component is hidden
-  if (!visible || !gridConfig.isVisible || containerWidth <= 0 || containerHeight <= 0) {
+    // Calculate how many full cells fit
+    const cols = Math.floor(imageWidthCm / gridConfig.gridCellWidth);
+    const rows = Math.floor(imageHeightCm / gridConfig.gridCellHeight);
+
+    const totalGridWidthCm = cols * gridConfig.gridCellWidth;
+    const totalGridHeightCm = rows * gridConfig.gridCellHeight;
+
+    const remainingWidthCm = imageWidthCm - totalGridWidthCm;
+    const remainingHeightCm = imageHeightCm - totalGridHeightCm;
+
+    // Convert to pixels for rendering
+    const pxPerCmWidth = containerWidth / imageWidthCm;
+    const pxPerCmHeight = containerHeight / imageHeightCm;
+
+    const cellWidthPx = gridConfig.gridCellWidth * pxPerCmWidth;
+    const cellHeightPx = gridConfig.gridCellHeight * pxPerCmHeight;
+
+    const totalGridWidthPx = totalGridWidthCm * pxPerCmWidth;
+    const totalGridHeightPx = totalGridHeightCm * pxPerCmHeight;
+
+    const remainingWidthPx = remainingWidthCm * pxPerCmWidth;
+    const remainingHeightPx = remainingHeightCm * pxPerCmHeight;
+
+    // Full image dimensions in pixels (including remaining space)
+    const fullImageWidthPx = totalGridWidthPx + remainingWidthPx;
+    const fullImageHeightPx = totalGridHeightPx + remainingHeightPx;
+
+    return {
+      rows: Math.max(0, rows),
+      cols: Math.max(0, cols),
+      cellWidthPx,
+      cellHeightPx,
+      remainingWidthPx,
+      remainingHeightPx,
+      totalGridWidthPx,
+      totalGridHeightPx,
+      fullImageWidthPx,
+      fullImageHeightPx,
+    };
+  }, [
+    imageData.realWorldWidth,
+    imageData.realWorldHeight,
+    containerWidth,
+    containerHeight,
+    gridConfig.gridCellWidth,
+    gridConfig.gridCellHeight,
+  ]);
+
+  if (
+    !visible ||
+    !gridConfig.isVisible ||
+    gridCalculation.rows === 0 ||
+    gridCalculation.cols === 0
+  ) {
     return null;
   }
 
-  // Calculate cell dimensions based on current grid settings
-  const cellWidth = containerWidth / gridConfig.cols;
-  const cellHeight = containerHeight / gridConfig.rows;
+  const verticalLines = useMemo(() => {
+    const lines = [];
 
-  // Generate vertical lines (columns) - excluding outer borders
-  const verticalLines = [];
-  for (let i = 1; i < gridConfig.cols; i++) {
-    const leftPosition = cellWidth * i - gridConfig.strokeWidth / 2;
-    verticalLines.push(
-      <View
-        key={`vertical-${i}`}
-        style={[
-          styles.verticalLine,
-          {
-            left: leftPosition,
-            width: gridConfig.strokeWidth,
-            height: containerHeight,
-            backgroundColor: gridConfig.strokeColor,
-          }
-        ]}
-      />
-    );
-  }
+    // Regular grid lines (full cells)
+    for (let i = 1; i <= gridCalculation.cols; i++) {
+      const leftPosition =
+        gridCalculation.cellWidthPx * i - gridConfig.strokeWidth / 2;
+      lines.push(
+        <View
+          key={`vertical-${i}`}
+          style={[
+            styles.verticalLine,
+            {
+              left: leftPosition,
+              width: gridConfig.strokeWidth,
+              height: gridCalculation.fullImageHeightPx,
+              backgroundColor: gridConfig.strokeColor,
+            },
+          ]}
+        />
+      );
+    }
 
-  // Generate horizontal lines (rows) - excluding outer borders
-  const horizontalLines = [];
-  for (let i = 1; i < gridConfig.rows; i++) {
-    const topPosition = cellHeight * i - gridConfig.strokeWidth / 2;
-    horizontalLines.push(
-      <View
-        key={`horizontal-${i}`}
-        style={[
-          styles.horizontalLine,
-          {
-            top: topPosition,
-            height: gridConfig.strokeWidth,
-            width: containerWidth,
-            backgroundColor: gridConfig.strokeColor,
-          }
-        ]}
-      />
-    );
-  }
+    return lines;
+  }, [
+    gridCalculation.cols,
+    gridCalculation.cellWidthPx,
+    gridCalculation.fullImageHeightPx,
+    gridConfig.strokeWidth,
+    gridConfig.strokeColor,
+  ]);
 
-  // Generate labels for top row and left column only
-  const renderLabels = () => {
+  const horizontalLines = useMemo(() => {
+    const lines = [];
+
+    // Regular grid lines (full cells)
+    for (let i = 1; i <= gridCalculation.rows; i++) {
+      const topPosition =
+        gridCalculation.cellHeightPx * i - gridConfig.strokeWidth / 2;
+      lines.push(
+        <View
+          key={`horizontal-${i}`}
+          style={[
+            styles.horizontalLine,
+            {
+              top: topPosition,
+              height: gridConfig.strokeWidth,
+              width: gridCalculation.fullImageWidthPx,
+              backgroundColor: gridConfig.strokeColor,
+            },
+          ]}
+        />
+      );
+    }
+
+    return lines;
+  }, [
+    gridCalculation.rows,
+    gridCalculation.cellHeightPx,
+    gridCalculation.fullImageWidthPx,
+    gridConfig.strokeWidth,
+    gridConfig.strokeColor,
+  ]);
+
+  const renderLabels = useMemo(() => {
     if (!gridConfig.showLabels || gridConfig.labelStyle === 'NONE') {
       return null;
     }
 
     const labels = [];
 
-    // Top row labels (columns) - positioned at top center of each cell
+    // Top row column labels (inside first row cells)
     if (gridConfig.labelStyle === 'COL' || gridConfig.labelStyle === 'BOTH') {
-      for (let col = 0; col < gridConfig.cols; col++) {
+      for (let col = 0; col < gridCalculation.cols; col++) {
         labels.push(
           <View
             key={`top-label-${col}`}
             style={[
               styles.topLabel,
               {
-                left: col * cellWidth + cellWidth / 2 - 12, // Horizontally centered in cell
-                top: 5, // Positioned at the top with small margin
-              }
+                left: col * gridCalculation.cellWidthPx,
+                top: 0,
+                width: gridCalculation.cellWidthPx,
+                height: gridCalculation.cellHeightPx,
+              },
             ]}
           >
             <Text style={styles.labelText}>{col + 1}</Text>
@@ -111,18 +211,20 @@ const GridOverlay: React.FC<GridOverlayProps> = ({
       }
     }
 
-    // Left column labels (rows) - positioned at middle left of each cell
+    // Left column row labels (inside first column cells)
     if (gridConfig.labelStyle === 'ROW' || gridConfig.labelStyle === 'BOTH') {
-      for (let row = 0; row < gridConfig.rows; row++) {
+      for (let row = 0; row < gridCalculation.rows; row++) {
         labels.push(
           <View
             key={`left-label-${row}`}
             style={[
               styles.leftLabel,
               {
-                left: 5, // Positioned at the left with small margin
-                top: row * cellHeight + cellHeight / 2 - 12, // Vertically centered in cell
-              }
+                left: 0,
+                top: row * gridCalculation.cellHeightPx,
+                width: gridCalculation.cellWidthPx,
+                height: gridCalculation.cellHeightPx,
+              },
             ]}
           >
             <Text style={styles.labelText}>{row + 1}</Text>
@@ -132,23 +234,14 @@ const GridOverlay: React.FC<GridOverlayProps> = ({
     }
 
     return labels;
-  };
-
-  // Show grid info for debugging (optional - can be removed in production)
-  const renderGridInfo = () => {
-    if (gridConfig.gridMode === "advanced") {
-      const widthCm = (gridConfig.gridCellWidth / 10).toFixed(1);
-      const heightCm = (gridConfig.gridCellHeight / 10).toFixed(1);
-      return (
-        <View style={styles.gridInfo}>
-          <Text style={styles.gridInfoText}>
-            {gridConfig.rows}×{gridConfig.cols} ({widthCm}×{heightCm}cm)
-          </Text>
-        </View>
-      );
-    }
-    return null;
-  };
+  }, [
+    gridConfig.showLabels,
+    gridConfig.labelStyle,
+    gridCalculation.cols,
+    gridCalculation.rows,
+    gridCalculation.cellWidthPx,
+    gridCalculation.cellHeightPx,
+  ]);
 
   return (
     <View
@@ -157,12 +250,9 @@ const GridOverlay: React.FC<GridOverlayProps> = ({
         {
           width: containerWidth,
           height: containerHeight,
-          // Add border on all four sides
-          borderWidth: gridConfig.strokeWidth,
-          borderColor: gridConfig.strokeColor,
-        }
+        },
       ]}
-      pointerEvents="none" // Allow touch events to pass through to the image below
+      pointerEvents="none"
     >
       {/* Render vertical lines */}
       {verticalLines}
@@ -170,11 +260,55 @@ const GridOverlay: React.FC<GridOverlayProps> = ({
       {/* Render horizontal lines */}
       {horizontalLines}
 
-      {/* Render labels if enabled */}
-      {renderLabels()}
+      {/* Render labels INSIDE grid cells */}
+      {renderLabels}
 
-      {/* Render grid info (optional) */}
-      {renderGridInfo()}
+      {/* Grid border outline (full image including remaining space) */}
+      <View
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          width: gridCalculation.fullImageWidthPx,
+          height: gridCalculation.fullImageHeightPx,
+          borderWidth: gridConfig.strokeWidth,
+          borderColor: gridConfig.strokeColor,
+        }}
+        pointerEvents="none"
+      />
+
+      {/* Partial/Remaining area visual indicator (optional subtle overlay) */}
+      {gridCalculation.remainingWidthPx > 0 && (
+        <View
+          style={{
+            position: 'absolute',
+            left: gridCalculation.totalGridWidthPx,
+            top: 0,
+            width: gridCalculation.remainingWidthPx,
+            height: gridCalculation.fullImageHeightPx,
+            backgroundColor: 'rgba(255, 165, 0, 0.05)',
+            borderLeftWidth: gridConfig.strokeWidth,
+            borderLeftColor: 'rgba(255, 165, 0, 0.3)',
+          }}
+          pointerEvents="none"
+        />
+      )}
+
+      {gridCalculation.remainingHeightPx > 0 && (
+        <View
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: gridCalculation.totalGridHeightPx,
+            width: gridCalculation.totalGridWidthPx,
+            height: gridCalculation.remainingHeightPx,
+            backgroundColor: 'rgba(255, 165, 0, 0.05)',
+            borderTopWidth: gridConfig.strokeWidth,
+            borderTopColor: 'rgba(255, 165, 0, 0.3)',
+          }}
+          pointerEvents="none"
+        />
+      )}
     </View>
   );
 };
@@ -186,72 +320,30 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     left: 0,
-    zIndex: 10, // Ensure grid appears above image
+    zIndex: 10,
   },
   verticalLine: {
     position: 'absolute',
-    top: 0,
   },
   horizontalLine: {
     position: 'absolute',
-    left: 0,
   },
-  // Top row labels - positioned at top center of each column
   topLabel: {
     position: 'absolute',
-    width: 24,
-    height: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.4)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.3,
-    shadowRadius: 2,
-    elevation: 3,
+    zIndex: 999,
   },
-  // Left column labels - positioned at middle left of each row
   leftLabel: {
     position: 'absolute',
-    width: 24,
-    height: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.4)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.3,
-    shadowRadius: 2,
-    elevation: 3,
+    zIndex: 999,
   },
   labelText: {
     color: '#ffffff',
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '700',
     textAlign: 'center',
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 1,
-  },
-  // Grid info display (optional)
-  gridInfo: {
-    position: 'absolute',
-    top: 5,
-    right: 5,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  gridInfoText: {
-    color: '#ffffff',
-    fontSize: 10,
-    fontWeight: '600',
   },
 });
