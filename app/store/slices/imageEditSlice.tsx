@@ -47,6 +47,8 @@ interface ImageEditState {
     gridCellWidth: number;  // Default: 2 cm
     gridCellHeight: number; // Default: 2 cm
     gridMode: "default" | "advanced";
+
+    isLocked: boolean;
 }
 
 // Paper preset sizes in cm (A0 to A5)
@@ -84,6 +86,9 @@ const initialState: ImageEditState = {
     gridCellWidth: 2,
     gridCellHeight: 2,
     gridMode: "default",
+
+    // Initially unlocked
+    isLocked: false,
 };
 
 // Helpers
@@ -340,6 +345,19 @@ const slice = createSlice({
                 state.gridMode = "advanced";
             }
         },
+
+
+
+        // New: lock and unlock actions
+        lockPage(state) {
+            state.isLocked = true;
+        },
+        unlockPage(state) {
+            state.isLocked = false;
+        },
+        toggleLock(state) {
+            state.isLocked = !state.isLocked;
+        },
     },
 });
 
@@ -470,6 +488,9 @@ export const {
     setGridCellDimensions,
     setGridCellWidth,
     setGridCellHeight,
+    lockPage,
+    unlockPage,
+    toggleLock,
 } = slice.actions;
 
 // Export paper sizes and types

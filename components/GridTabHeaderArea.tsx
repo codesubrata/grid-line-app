@@ -16,8 +16,9 @@ import {
   View,
   ScrollView,
 } from 'react-native';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import ExpandedImageModal from './ExpandedImageModal';
+import { lockPage, unlockPage } from '@/app/store/slices/imageEditSlice';
 
 interface GridTabHeaderAreaProps {
   onBack?: () => void;
@@ -75,6 +76,8 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
   onExport,
   onExpandToggle,
 }) => {
+  const dispatch = useDispatch();
+
   const [isExpanded, setIsExpanded] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadCompleted, setDownloadCompleted] = useState(false);
@@ -96,11 +99,13 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
     fileName: state.image.fileName,
     source: state.image.source,
   }));
+  const isLocked = useSelector((state: RootState) => state.imageEdit.isLocked);
 
   const exportScale = useRef(new Animated.Value(1)).current;
   const exportOpacity = useRef(new Animated.Value(1)).current;
   const expandScale = useRef(new Animated.Value(1)).current;
   const expandOpacity = useRef(new Animated.Value(1)).current;
+  const lockScale = useRef(new Animated.Value(1)).current;
   const successScale = useRef(new Animated.Value(1)).current;
   const successRotation = useRef(new Animated.Value(0)).current;
 
@@ -137,6 +142,21 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
       setDownloadCompleted(false);
       successRotation.setValue(0);
     }, 3000);
+  };
+
+  const playLockAnimation = () => {
+    Animated.sequence([
+      Animated.timing(lockScale, {
+        toValue: 1.2,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+      Animated.timing(lockScale, {
+        toValue: 1,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+    ]).start();
   };
 
   const downloadImage = async (fileName: string) => {
@@ -184,11 +204,26 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
   };
 
   const handleHamburgerMenu = () => {
-    console.log('i will add a hamburger menu here');
-
+    if (isLocked) {
+      Alert.alert('Locked', 'Page is locked. Unlock to perform this action.');
+      return;
+    }
+    console.log('Hamburger menu opened');
   };
-  const handleHome = () => router.push('/(tabs)');
+
+  const handleHome = () => {
+    if (isLocked) {
+      Alert.alert('Locked', 'Page is locked. Unlock to navigate.');
+      return;
+    }
+    router.push('/(tabs)');
+  };
+
   const handleExport = () => {
+    if (isLocked) {
+      Alert.alert('Locked', 'Page is locked. Unlock to export.');
+      return;
+    }
     if (!currentImage) {
       Alert.alert('No Image', 'Please select an image first.');
       return;
@@ -196,11 +231,24 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
     if (isDownloading) return;
     setShowFileNameModal(true);
   };
+
   const handleFileNameConfirm = (fileName: string) => {
     setShowFileNameModal(false);
     downloadImage(fileName);
   };
+
   const handleFileNameCancel = () => setShowFileNameModal(false);
+
+  const toggleLockHandler = () => {
+    playLockAnimation();
+    if (isLocked) {
+      dispatch(unlockPage());
+      Alert.alert('Unlocked', 'Page is now unlocked. You can edit and interact with the app.');
+    } else {
+      dispatch(lockPage());
+      Alert.alert('Locked', 'Page is now locked. Only expand and create new project are available.');
+    }
+  };
 
   const handleExpandToggle = () => {
     const newState = !isExpanded;
@@ -223,7 +271,14 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
     onExpandToggle?.(false);
   };
 
-  const handleInfoPress = () => setShowImageInfo(true);
+  const handleInfoPress = () => {
+    if (isLocked) {
+      Alert.alert('Locked', 'Page is locked. Unlock to view image info.');
+      return;
+    }
+    setShowImageInfo(true);
+  };
+
   const handleInfoClose = () => setShowImageInfo(false);
 
   const formatFileSize = (bytes?: number): string => {
@@ -232,21 +287,28 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
+
   const formatDimension = (value?: number, unit?: string): string => {
     if (!value || !unit) return 'N/A';
     return `${value} ${unit}`;
   };
+
   const formatAspectRatio = (ratio?: number): string => {
     if (!ratio) return 'N/A';
     return `${ratio.toFixed(3)}:1`;
   };
+
   const formatImageSource = (source?: string): string => {
     if (!source) return 'N/A';
     switch (source) {
-      case 'camera': return 'Camera';
-      case 'gallery': return 'Gallery';
-      case 'default': return 'Default';
-      default: return source.charAt(0).toUpperCase() + source.slice(1);
+      case 'camera':
+        return 'Camera';
+      case 'gallery':
+        return 'Gallery';
+      case 'default':
+        return 'Default';
+      default:
+        return source.charAt(0).toUpperCase() + source.slice(1);
     }
   };
 
@@ -260,7 +322,6 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
       <View style={styles.container}>
         <View style={styles.content}>
           <View style={styles.leftSection}>
-            {/* i will add a hamburger menu here */}
             <Pressable
               style={styles.backButton}
               onPress={handleHamburgerMenu}
@@ -269,26 +330,40 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
               <MaterialIcons name="arrow-back-ios-new" size={24} color="#FFF" />
             </Pressable>
           </View>
+
           <View style={styles.rightSection}>
+            {/* Info Button */}
             <Pressable
-              style={styles.iconButton}
+              style={[styles.iconButton, isLocked && styles.iconButtonLocked]}
               onPress={handleInfoPress}
               android_ripple={{ color: 'rgba(255,255,255,0.15)', radius: 24 }}
             >
-              <MaterialIcons name="info-outline" size={24} color="#fff" />
+              <MaterialIcons
+                name="info-outline"
+                size={24}
+                color={isLocked ? 'rgba(255,255,255,0.5)' : '#fff'}
+              />
             </Pressable>
+
+            {/* Home Button */}
             <Pressable
-              style={styles.iconButton}
+              style={[styles.iconButton, isLocked && styles.iconButtonLocked]}
               onPress={handleHome}
               android_ripple={{ color: 'rgba(255,255,255,0.15)', radius: 24 }}
             >
-              <MaterialIcons name="home" size={24} color="#fff" />
+              <MaterialIcons
+                name="home"
+                size={24}
+                color={isLocked ? 'rgba(255,255,255,0.5)' : '#fff'}
+              />
             </Pressable>
+
+            {/* Export Button */}
             <Animated.View
               style={{
                 transform: [
                   { scale: downloadCompleted ? successScale : exportScale },
-                  { rotate: downloadCompleted ? rotateInterpolation : '0deg' }
+                  { rotate: downloadCompleted ? rotateInterpolation : '0deg' },
                 ],
                 opacity: exportOpacity,
               }}
@@ -298,9 +373,10 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
                   styles.exportButton,
                   downloadCompleted && styles.exportButtonSuccess,
                   isDownloading && styles.exportButtonLoading,
+                  isLocked && styles.exportButtonLocked,
                 ]}
                 onPress={handleExport}
-                disabled={isDownloading}
+                disabled={isDownloading || isLocked}
                 android_ripple={{ color: 'rgba(0, 122, 255, 0.3)', radius: 19 }}
               >
                 {isDownloading ? (
@@ -308,10 +384,34 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
                 ) : downloadCompleted ? (
                   <MaterialIcons name="check-circle" size={24} color="#4CAF50" />
                 ) : (
-                  <MaterialIcons name="save-alt" size={24} color="#007AFF" />
+                  <MaterialIcons
+                    name="save-alt"
+                    size={24}
+                    color={isLocked ? 'rgba(0, 122, 255, 0.5)' : '#007AFF'}
+                  />
                 )}
               </Pressable>
             </Animated.View>
+
+            {/* Lock Button */}
+            <Animated.View style={{ transform: [{ scale: lockScale }] }}>
+              <Pressable
+                style={[
+                  styles.lockButton,
+                  isLocked && styles.lockButtonActive,
+                ]}
+                onPress={toggleLockHandler}
+                android_ripple={{ color: 'rgba(255,255,255,0.15)', radius: 19 }}
+              >
+                <MaterialIcons
+                  name={isLocked ? 'lock' : 'lock-open'}
+                  size={24}
+                  color={isLocked ? '#FF4B4B' : '#4CAF50'}
+                />
+              </Pressable>
+            </Animated.View>
+
+            {/* Expand Button */}
             <Animated.View style={{ transform: [{ scale: expandScale }], opacity: expandOpacity }}>
               <Pressable
                 style={[styles.expandButton, isExpanded && styles.expandButtonActive]}
@@ -350,13 +450,19 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
                   <View style={styles.infoRow}>
                     <Text style={styles.infoLabel}>Width:</Text>
                     <Text style={styles.infoValue}>
-                      {formatDimension(imageMetadata.realWorldWidth ?? imageMetadata.width, imageMetadata.realWorldUnit ?? imageMetadata.unit)}
+                      {formatDimension(
+                        imageMetadata.realWorldWidth ?? imageMetadata.width,
+                        imageMetadata.realWorldUnit ?? imageMetadata.unit
+                      )}
                     </Text>
                   </View>
                   <View style={styles.infoRow}>
                     <Text style={styles.infoLabel}>Height:</Text>
                     <Text style={styles.infoValue}>
-                      {formatDimension(imageMetadata.realWorldHeight ?? imageMetadata.height, imageMetadata.realWorldUnit ?? imageMetadata.unit)}
+                      {formatDimension(
+                        imageMetadata.realWorldHeight ?? imageMetadata.height,
+                        imageMetadata.realWorldUnit ?? imageMetadata.unit
+                      )}
                     </Text>
                   </View>
                   <View style={styles.infoRow}>
@@ -468,6 +574,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.08)',
   },
+  iconButtonLocked: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
   exportButton: {
     width: 38,
     height: 38,
@@ -481,6 +590,24 @@ const styles = StyleSheet.create({
   },
   exportButtonSuccess: {
     backgroundColor: 'rgba(76, 175, 80, 0.2)',
+  },
+  exportButtonLocked: {
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+    opacity: 0.6,
+  },
+  lockButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(76, 175, 80, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(76, 175, 80, 0.3)',
+  },
+  lockButtonActive: {
+    backgroundColor: 'rgba(255, 75, 75, 0.15)',
+    borderColor: 'rgba(255, 75, 75, 0.3)',
   },
   expandButton: {
     width: 38,

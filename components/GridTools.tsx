@@ -11,7 +11,6 @@ import {
 } from 'react-native';
 import { useSelector } from 'react-redux';
 
-// Tool Type
 interface EditTool {
     id: string;
     name: string;
@@ -42,6 +41,9 @@ const GridEditTools: React.FC<GridEditToolsProps> = ({
 }) => {
     const [activeTool, setActiveTool] = useState<string | null>(null);
 
+    // Get lock state from redux
+    const isLocked = useSelector((state: any) => state.imageEdit.isLocked);
+
     const editTools: EditTool[] = [
         { id: 'frame', name: 'Frame', icon: 'border-all', category: 'effects' },
         { id: 'stroke', name: 'Stroke', icon: 'border-color', category: 'effects' },
@@ -49,13 +51,11 @@ const GridEditTools: React.FC<GridEditToolsProps> = ({
         { id: 'sharpen', name: 'Sharpen', icon: 'tune', category: 'effects' },
     ];
 
-
-
     // Handle Grid Toggle
     const handleGridToggle = (value: boolean) => {
+        if (isLocked) return; // Do nothing if locked
         onGridToggle?.(value);
         onToolSelect?.('grid');
-        // If both grid AND diagonal grid are off, also disable label
         if (!value && !isDiagonalGridVisible && isLabelVisible) {
             onLabelToggle?.(false);
         }
@@ -63,22 +63,19 @@ const GridEditTools: React.FC<GridEditToolsProps> = ({
 
     // Handle Diagonal Grid Toggle
     const handleDiagonalGridToggle = (value: boolean) => {
-        console.log("Diagonal Grid toggled:", value);  // <-- Add this line to log the value
+        if (isLocked) return; // Do nothing if locked
 
         onDiagonalGridToggle?.(value);
         onToolSelect?.('diagonal');
-        // If both grid AND diagonal grid are off, also disable label
         if (!value && !isGridVisible && isLabelVisible) {
             onLabelToggle?.(false);
         }
-
-        // console.log("Diagonal Grid visibility from Redux slice:", isDiagonalGridVisible);
     };
-
 
     // Handle Label Toggle
     const handleLabelToggle = (value: boolean) => {
-        // Allow toggling label only if grid or diagonal grid is enabled
+        if (isLocked) return;  // Do nothing if locked
+
         if (isGridVisible || isDiagonalGridVisible) {
             onLabelToggle?.(value);
             onToolSelect?.('label');
@@ -87,6 +84,8 @@ const GridEditTools: React.FC<GridEditToolsProps> = ({
 
     // Handle Tool Press
     const handleToolPress = (toolId: string) => {
+        if (isLocked) return; // Do nothing if locked
+
         setActiveTool(prev => (prev === toolId ? null : toolId));
         onToolSelect?.(toolId);
         if (['frame', 'stroke', 'fx', 'sharpen'].includes(toolId)) {
@@ -109,8 +108,9 @@ const GridEditTools: React.FC<GridEditToolsProps> = ({
                         trackColor={{ false: '#555', true: '#00FF00' }}
                         thumbColor={isGridVisible ? '#00FF00' : '#ccc'}
                         style={{ transform: [{ scaleX: 1.2 }, { scaleY: 1.2 }] }}
+                        disabled={isLocked}
                     />
-                    <Text style={styles.toggleLabel}>Grid</Text>
+                    <Text style={[styles.toggleLabel, isLocked && { color: '#555' }]}>Grid</Text>
                 </View>
 
                 {/* Diagonal Grid Toggle Switch */}
@@ -121,8 +121,9 @@ const GridEditTools: React.FC<GridEditToolsProps> = ({
                         trackColor={{ false: '#555', true: '#FFA000' }}
                         thumbColor={isDiagonalGridVisible ? '#FFA000' : '#ccc'}
                         style={{ transform: [{ scaleX: 1.2 }, { scaleY: 1.2 }] }}
+                        disabled={isLocked}
                     />
-                    <Text style={styles.toggleLabel}>Diagonal</Text>
+                    <Text style={[styles.toggleLabel, isLocked && { color: '#555' }]}>Diagonal</Text>
                 </View>
 
                 {/* Label Toggle Switch */}
@@ -133,13 +134,12 @@ const GridEditTools: React.FC<GridEditToolsProps> = ({
                         trackColor={{ false: '#555', true: '#007AFF' }}
                         thumbColor={isLabelVisible ? '#007AFF' : '#ccc'}
                         style={{ transform: [{ scaleX: 1.2 }, { scaleY: 1.2 }] }}
-                        // Disable the label switch when both grid and diagonal are off
-                        disabled={!(isGridVisible || isDiagonalGridVisible)}
+                        disabled={isLocked || !(isGridVisible || isDiagonalGridVisible)}
                     />
                     <Text
                         style={[
                             styles.toggleLabel,
-                            !(isGridVisible || isDiagonalGridVisible) && { color: '#888' }
+                            (!(isGridVisible || isDiagonalGridVisible) || isLocked) && { color: '#888' }
                         ]}
                     >
                         Label
@@ -152,11 +152,13 @@ const GridEditTools: React.FC<GridEditToolsProps> = ({
                         key={tool.id}
                         style={styles.toolButton}
                         onPress={() => handleToolPress(tool.id)}
+                        disabled={isLocked}
                     >
                         <View
                             style={[
                                 styles.toolIconContainer,
                                 activeTool === tool.id && styles.glowingRing,
+                                isLocked && { opacity: 0.4 }
                             ]}
                         >
                             <MaterialIcons
@@ -169,6 +171,7 @@ const GridEditTools: React.FC<GridEditToolsProps> = ({
                             style={[
                                 styles.toolLabel,
                                 activeTool === tool.id && styles.toolLabelActive,
+                                isLocked && { color: '#888' }
                             ]}
                         >
                             {tool.name}
@@ -241,7 +244,6 @@ const styles = StyleSheet.create({
         shadowRadius: 15,
         elevation: 25,
     },
-
     toolLabel: {
         fontSize: 10,
         fontWeight: '500',

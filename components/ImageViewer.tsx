@@ -4,6 +4,13 @@ import { Image } from "expo-image";
 import { useSelector } from "react-redux";
 import { RootState } from '@/app/store/store';
 import GridOverlay from './GridOverlay';
+import { GestureDetector, Gesture } from 'react-native-gesture-handler';
+import Animated, {
+    useSharedValue,
+    useAnimatedStyle,
+    withSpring,
+    withTiming,
+} from 'react-native-reanimated';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -19,11 +26,20 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
     const currentImage = useSelector((state: RootState) => state.image.currentImage);
     const imageEffect = useSelector((state: RootState) => state.imageEdit.imageEffect);
     const isGridVisible = useSelector((state: RootState) => state.imageEdit.isGridVisible);
+    const isLocked = useSelector((state: RootState) => state.imageEdit.isLocked);
 
     const [imageStyle, setImageStyle] = useState({
         width: 0,
         height: 0
     });
+
+    // Animated values for pan and zoom
+    const scale = useSharedValue(1);
+    const savedScale = useSharedValue(1);
+    const translateX = useSharedValue(0);
+    const translateY = useSharedValue(0);
+    const savedTranslateX = useSharedValue(0);
+    const savedTranslateY = useSharedValue(0);
 
     useEffect(() => {
         let isMounted = true;
@@ -41,16 +57,13 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
 
                     // Intelligent scaling logic
                     if (imageAspectRatio > availableAspectRatio) {
-                        // Image is wider (landscape) - fit to width
                         finalWidth = maxWidth;
                         finalHeight = maxWidth / imageAspectRatio;
                     } else {
-                        // Image is taller (portrait) or fits proportionally - fit to height
                         finalHeight = maxHeight;
                         finalWidth = maxHeight * imageAspectRatio;
                     }
 
-                    // Ensure dimensions don't exceed available space
                     if (finalWidth > maxWidth) {
                         finalWidth = maxWidth;
                         finalHeight = finalWidth / imageAspectRatio;
@@ -88,11 +101,69 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
         };
     }, [currentImage, maxWidth, maxHeight]);
 
-    // Apply image effects based on imageEffect state
+    // Pinch gesture for zoom, disabled when locked
+    const pinchGesture = Gesture.Pinch()
+        .enabled(!isLocked)
+        .onUpdate((event) => {
+            scale.value = savedScale.value * event.scale;
+        })
+        .onEnd(() => {
+            if (scale.value < 1) {
+                scale.value = withSpring(1);
+            } else if (scale.value > 5) {
+                scale.value = withSpring(5);
+            }
+            savedScale.value = scale.value;
+        });
+
+    // Pan gesture for dragging, disabled when locked
+    const panGesture = Gesture.Pan()
+        .enabled(!isLocked)
+        .onUpdate((event) => {
+            translateX.value = savedTranslateX.value + event.translationX;
+            translateY.value = savedTranslateY.value + event.translationY;
+        })
+        .onEnd(() => {
+            savedTranslateX.value = translateX.value;
+            savedTranslateY.value = translateY.value;
+        });
+
+    // Double tap gesture for zoom in/out, disabled when locked
+    const doubleTapGesture = Gesture.Tap()
+        .numberOfTaps(2)
+        .enabled(!isLocked)
+        .onEnd(() => {
+            if (scale.value > 1) {
+                scale.value = withTiming(1);
+                savedScale.value = 1;
+                translateX.value = withTiming(0);
+                translateY.value = withTiming(0);
+                savedTranslateX.value = 0;
+                savedTranslateY.value = 0;
+            } else {
+                scale.value = withTiming(2);
+                savedScale.value = 2;
+            }
+        });
+
+    const composedGesture = Gesture.Simultaneous(
+        Gesture.Race(doubleTapGesture, pinchGesture),
+        panGesture
+    );
+
+    const animatedStyle = useAnimatedStyle(() => {
+        return {
+            transform: [
+                { translateX: translateX.value },
+                { translateY: translateY.value },
+                { scale: scale.value },
+            ],
+        };
+    });
+
     const getImageStyle = () => {
         const baseStyle = [styles.image, imageStyle];
 
-        // Apply effects based on Redux state
         switch (imageEffect) {
             case 'grayscale':
                 return [
@@ -109,24 +180,24 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
             <View style={styles.imageSection}>
                 <View style={styles.imageWrapper}>
                     {currentImage ? (
-                        <View style={styles.imageContainer}>
-                            {/* Main Image */}
-                            <Image
-                                source={{ uri: currentImage }}
-                                style={getImageStyle()}
-                                contentFit="contain"
-                                transition={200}
-                            />
-
-                            {/* Grid Overlay - Positioned absolutely over the image */}
-                            {isGridVisible && imageStyle.width > 0 && imageStyle.height > 0 && (
-                                <GridOverlay
-                                    containerWidth={imageStyle.width}
-                                    containerHeight={imageStyle.height}
-                                    visible={true}
+                        <GestureDetector gesture={composedGesture}>
+                            <Animated.View style={[styles.imageContainer, animatedStyle]}>
+                                <Image
+                                    source={{ uri: currentImage }}
+                                    style={getImageStyle()}
+                                    contentFit="contain"
+                                    transition={200}
                                 />
-                            )}
-                        </View>
+
+                                {isGridVisible && imageStyle.width > 0 && imageStyle.height > 0 && (
+                                    <GridOverlay
+                                        containerWidth={imageStyle.width}
+                                        containerHeight={imageStyle.height}
+                                        visible={true}
+                                    />
+                                )}
+                            </Animated.View>
+                        </GestureDetector>
                     ) : (
                         <View style={styles.placeholderContainer}>
                             <View style={styles.placeholder}>
