@@ -3,20 +3,23 @@ import { StyleSheet, View, Dimensions, Image as RNImage, Text } from "react-nati
 import { Image } from "expo-image";
 import { useSelector } from "react-redux";
 import { RootState } from '@/app/store/store';
-import GridOverlay from './GridOverlay'; // Import the GridOverlay component
+import GridOverlay from './GridOverlay';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
-const ImageViewer = () => {
+interface ImageViewerProps {
+    maxWidth?: number;
+    maxHeight?: number;
+}
+
+const ImageViewer: React.FC<ImageViewerProps> = ({
+    maxWidth = SCREEN_WIDTH,
+    maxHeight = SCREEN_HEIGHT
+}) => {
     const currentImage = useSelector((state: RootState) => state.image.currentImage);
-
-    // Get imageEffect from Redux state ('none' or 'grayscale' expected)
     const imageEffect = useSelector((state: RootState) => state.imageEdit.imageEffect);
-
-    // Get grid visibility from Redux
     const isGridVisible = useSelector((state: RootState) => state.imageEdit.isGridVisible);
 
-    // Image sizing state for centered display at actual size
     const [imageStyle, setImageStyle] = useState({
         width: 0,
         height: 0
@@ -30,29 +33,42 @@ const ImageViewer = () => {
                 (imageWidth, imageHeight) => {
                     if (!isMounted) return;
 
-                    let finalWidth = imageWidth;
-                    let finalHeight = imageHeight;
+                    const imageAspectRatio = imageWidth / imageHeight;
+                    const availableAspectRatio = maxWidth / maxHeight;
 
-                    const maxWidth = SCREEN_WIDTH;
-                    const maxHeight = SCREEN_HEIGHT;
+                    let finalWidth: number;
+                    let finalHeight: number;
 
-                    if (finalWidth > maxWidth || finalHeight > maxHeight) {
-                        const aspectRatio = imageWidth / imageHeight;
-                        if (finalWidth > maxWidth) {
-                            finalWidth = maxWidth;
-                            finalHeight = finalWidth / aspectRatio;
-                        }
-                        if (finalHeight > maxHeight) {
-                            finalHeight = maxHeight;
-                            finalWidth = finalHeight * aspectRatio;
-                        }
-                    }
-
-                    if (finalWidth < maxWidth) {
-                        const aspectRatio = imageWidth / imageHeight;
+                    // Intelligent scaling logic
+                    if (imageAspectRatio > availableAspectRatio) {
+                        // Image is wider (landscape) - fit to width
                         finalWidth = maxWidth;
-                        finalHeight = finalWidth / aspectRatio;
+                        finalHeight = maxWidth / imageAspectRatio;
+                    } else {
+                        // Image is taller (portrait) or fits proportionally - fit to height
+                        finalHeight = maxHeight;
+                        finalWidth = maxHeight * imageAspectRatio;
                     }
+
+                    // Ensure dimensions don't exceed available space
+                    if (finalWidth > maxWidth) {
+                        finalWidth = maxWidth;
+                        finalHeight = finalWidth / imageAspectRatio;
+                    }
+
+                    if (finalHeight > maxHeight) {
+                        finalHeight = maxHeight;
+                        finalWidth = finalHeight * imageAspectRatio;
+                    }
+
+                    console.log("📐 Image Scaling:", {
+                        original: `${imageWidth}×${imageHeight}`,
+                        scaled: `${finalWidth.toFixed(0)}×${finalHeight.toFixed(0)}`,
+                        available: `${maxWidth}×${maxHeight}`,
+                        imageRatio: imageAspectRatio.toFixed(2),
+                        availableRatio: availableAspectRatio.toFixed(2),
+                        strategy: imageAspectRatio > availableAspectRatio ? "fit-width" : "fit-height"
+                    });
 
                     setImageStyle({
                         width: finalWidth,
@@ -70,9 +86,9 @@ const ImageViewer = () => {
         return () => {
             isMounted = false;
         };
-    }, [currentImage]);
+    }, [currentImage, maxWidth, maxHeight]);
 
-    // Apply image effects through style filters
+    // Apply image effects based on imageEffect state
     const getImageStyle = () => {
         const baseStyle = [styles.image, imageStyle];
 
@@ -81,7 +97,7 @@ const ImageViewer = () => {
             case 'grayscale':
                 return [
                     ...baseStyle,
-                    { tintColor: '#888888', opacity: 0.8 } // Simple grayscale effect
+                    { tintColor: '#888888', opacity: 0.8 }
                 ];
             default:
                 return baseStyle;
@@ -150,7 +166,6 @@ const styles = StyleSheet.create({
         position: "relative",
     },
 
-    // New container to hold both image and grid overlay
     imageContainer: {
         position: "relative",
         justifyContent: "center",
@@ -194,12 +209,12 @@ const styles = StyleSheet.create({
         lineHeight: 20,
     },
 
-    // Keep these for potential future use
     gridOverlay: {
         position: "absolute",
         backgroundColor: "transparent",
         borderRadius: 8,
     },
+
     editOverlay: {
         position: "absolute",
         backgroundColor: "transparent",

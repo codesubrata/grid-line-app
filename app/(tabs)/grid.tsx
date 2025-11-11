@@ -22,7 +22,8 @@ const SCREEN_HEIGHT = height;
 // Fixed height allocations
 const HEADER_HEIGHT = SCREEN_HEIGHT * 0.08; // 8% for header
 const BOTTOM_HEIGHT = SCREEN_HEIGHT * 0.10; // 10% for bottom bar
-const IMAGE_AREA_HEIGHT = SCREEN_HEIGHT - HEADER_HEIGHT - BOTTOM_HEIGHT; // 82% for image area
+const AVAILABLE_IMAGE_HEIGHT = SCREEN_HEIGHT - HEADER_HEIGHT - BOTTOM_HEIGHT;
+const AVAILABLE_IMAGE_WIDTH = SCREEN_WIDTH;
 
 export default function Grid() {
   const dispatch = useDispatch();
@@ -58,35 +59,6 @@ export default function Grid() {
   // Modal management state
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [selectedTool, setSelectedTool] = useState<string | null>(null);
-
-  // Log grid info for debugging
-  useEffect(() => {
-    if (imageData.realWorldWidth && imageData.realWorldHeight) {
-      console.log("📋 Grid Configuration:", {
-        paperPreset: gridState.paperPresetType,
-        paperDimensions: `${paperSize.width}×${paperSize.height} cm`,
-        isCustom: imageData.isCustomPaper,
-        cellSize: `${gridState.gridCellWidth}×${gridState.gridCellHeight} cm`,
-        gridMode: gridState.gridMode,
-        gridVisible: gridState.isGridVisible,
-        diagonalGridVisible: gridState.isDiagonalGridVisible,
-        labelsVisible: gridState.showLabels,
-      });
-    }
-  }, [
-    gridState.paperPresetType,
-    gridState.gridCellWidth,
-    gridState.gridCellHeight,
-    gridState.gridMode,
-    gridState.isGridVisible,
-    gridState.isDiagonalGridVisible,
-    gridState.showLabels,
-    imageData.realWorldWidth,
-    imageData.realWorldHeight,
-    imageData.isCustomPaper,
-    paperSize.width,
-    paperSize.height,
-  ]);
 
   // Header handlers
   const handleBack = () => {
@@ -141,35 +113,26 @@ export default function Grid() {
   // Grid and label toggle handlers
   const handleGridToggle = (isVisible: boolean) => {
     dispatch(setGridVisibility(isVisible));
-    console.log("Grid visibility toggled:", isVisible);
     if (!isVisible && !gridState.isDiagonalGridVisible && gridState.showLabels) {
       dispatch(setShowLabels(false));
-      console.log("Labels disabled because both grids are off");
     }
   };
 
   const handleDiagonalGridToggle = (isVisible: boolean) => {
     dispatch(setDiagonalGridVisibility(isVisible));
-    console.log("Diagonal grid visibility toggled:", isVisible);
     if (!isVisible && !gridState.isGridVisible && gridState.showLabels) {
       dispatch(setShowLabels(false));
-      console.log("Labels disabled because both grids are off");
     }
   };
 
   const handleLabelToggle = (isVisible: boolean) => {
-    // Allow toggling label only if grid or diagonal grid is enabled
     if (gridState.isGridVisible || gridState.isDiagonalGridVisible) {
       dispatch(setShowLabels(isVisible));
       if (!isVisible) {
         dispatch(setLabelStyle("NONE"));
-        console.log("Labels hidden, style set to NONE");
       } else {
         if (gridState.labelStyle === "NONE") {
           dispatch(setLabelStyle("BOTH"));
-          console.log("Labels shown, style set to BOTH");
-        } else {
-          console.log("Labels shown with existing style:", gridState.labelStyle);
         }
       }
     }
@@ -177,19 +140,16 @@ export default function Grid() {
 
   // Tool selection handler
   const handleToolSelect = (toolId: string) => {
-    console.log("Tool selected:", toolId);
     setSelectedTool(toolId);
   };
 
   // Modal handlers
   const handleOpenModal = (toolId: string) => {
-    console.log("Opening modal for tool:", toolId);
     setSelectedTool(toolId);
     setIsModalVisible(true);
   };
 
   const handleCloseModal = () => {
-    console.log("Closing modal");
     setIsModalVisible(false);
     setSelectedTool(null);
   };
@@ -197,7 +157,7 @@ export default function Grid() {
   return (
     <TabWrapper>
       <View style={styles.container}>
-        {/* 1. Fixed Header Area - 8% */}
+        {/* Floating Header Area */}
         <View style={[styles.headerSection, { height: HEADER_HEIGHT }]}>
           <GridTabHeaderArea
             onBack={handleBack}
@@ -207,21 +167,34 @@ export default function Grid() {
           />
         </View>
 
-        {/* 2. Image Preview Area - 82% (ImageViewer Component) */}
-        <View style={[styles.imageSection, { height: IMAGE_AREA_HEIGHT }]}>
-          <ImageViewer />
+        {/* Content - Image Preview fills space between header and bottom */}
+        <View 
+          style={[
+            styles.imageSection,
+            { 
+              top: HEADER_HEIGHT, 
+              bottom: BOTTOM_HEIGHT,
+              height: AVAILABLE_IMAGE_HEIGHT,
+              width: AVAILABLE_IMAGE_WIDTH,
+            }
+          ]}
+        >
+          <ImageViewer 
+            maxWidth={AVAILABLE_IMAGE_WIDTH}
+            maxHeight={AVAILABLE_IMAGE_HEIGHT}
+          />
         </View>
 
-        {/* 3. Fixed Bottom Tools Area - 10% */}
+        {/* Floating Bottom Tools Area */}
         <View style={[styles.bottomSection, { height: BOTTOM_HEIGHT }]}>
           <GridEditTools
             onToolSelect={handleToolSelect}
             onGridToggle={handleGridToggle}
-            onDiagonalGridToggle={handleDiagonalGridToggle}  // Added diagonal toggle prop
+            onDiagonalGridToggle={handleDiagonalGridToggle}
             onLabelToggle={handleLabelToggle}
             onOpenModal={handleOpenModal}
             isGridVisible={gridState.isGridVisible}
-            isDiagonalGridVisible={gridState.isDiagonalGridVisible}  // Added diagonal prop
+            isDiagonalGridVisible={gridState.isDiagonalGridVisible}
             isLabelVisible={gridState.showLabels}
           />
         </View>
@@ -244,37 +217,39 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#000000",
   },
-  // Header Section - Fixed 8%
   headerSection: {
+    position: "absolute",
+    top: 0,
     width: "100%",
     backgroundColor: "#1C1C1E",
     borderBottomWidth: 0.5,
     borderBottomColor: "rgba(255, 255, 255, 0.1)",
+    zIndex: 1000,
   },
-  // Image Section - 82% (ImageViewer takes full available space)
   imageSection: {
-    flex: 1,
-    width: "100%",
-    height: '100%',
+    position: "absolute",
     justifyContent: "center",
     alignItems: "center",
-    position: "relative",
+    backgroundColor: "transparent",
   },
-  // Bottom Section - Fixed 10%
   bottomSection: {
+    position: "absolute",
+    bottom: 0,
     width: "100%",
     backgroundColor: "#1C1C1E",
+    borderTopWidth: 0.5,
+    borderTopColor: "rgba(255, 255, 255, 0.1)",
+    zIndex: 1000,
   },
-  // Modal styles
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "flex-end",
   },
   modalContainer: {
-    backgroundColor: 'transparent',
+    backgroundColor: "transparent",
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
 });

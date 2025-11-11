@@ -14,22 +14,22 @@ const GridOverlay: React.FC<GridOverlayProps> = ({
   containerHeight,
   visible = true,
 }) => {
-  // Get image real-world dimensions (always in cm)
+  // Redux selectors
   const imageData = useSelector((state: RootState) => ({
     realWorldWidth: state.image.realWorldWidth,
     realWorldHeight: state.image.realWorldHeight,
   }));
 
-  // Get grid configuration
   const gridConfig = useSelector((state: RootState) => ({
     isVisible: state.imageEdit.isGridVisible,
+    isDiagonalVisible: state.imageEdit.isDiagonalGridVisible,
     strokeColor: state.imageEdit.strokeColor,
     strokeWidth: state.imageEdit.strokeWidth,
     showLabels: state.imageEdit.showLabels,
     labelStyle: state.imageEdit.labelStyle,
     gridMode: state.imageEdit.gridMode,
-    gridCellWidth: state.imageEdit.gridCellWidth,   // in cm
-    gridCellHeight: state.imageEdit.gridCellHeight, // in cm
+    gridCellWidth: state.imageEdit.gridCellWidth,
+    gridCellHeight: state.imageEdit.gridCellHeight,
   }));
 
   const gridCalculation = useMemo(() => {
@@ -57,34 +57,26 @@ const GridOverlay: React.FC<GridOverlayProps> = ({
       };
     }
 
-    // All dimensions are in cm
     const imageWidthCm = imageData.realWorldWidth;
     const imageHeightCm = imageData.realWorldHeight;
-
-    // Calculate how many full cells fit
     const cols = Math.floor(imageWidthCm / gridConfig.gridCellWidth);
     const rows = Math.floor(imageHeightCm / gridConfig.gridCellHeight);
 
     const totalGridWidthCm = cols * gridConfig.gridCellWidth;
     const totalGridHeightCm = rows * gridConfig.gridCellHeight;
-
     const remainingWidthCm = imageWidthCm - totalGridWidthCm;
     const remainingHeightCm = imageHeightCm - totalGridHeightCm;
 
-    // Convert to pixels for rendering
     const pxPerCmWidth = containerWidth / imageWidthCm;
     const pxPerCmHeight = containerHeight / imageHeightCm;
 
     const cellWidthPx = gridConfig.gridCellWidth * pxPerCmWidth;
     const cellHeightPx = gridConfig.gridCellHeight * pxPerCmHeight;
-
     const totalGridWidthPx = totalGridWidthCm * pxPerCmWidth;
     const totalGridHeightPx = totalGridHeightCm * pxPerCmHeight;
-
     const remainingWidthPx = remainingWidthCm * pxPerCmWidth;
     const remainingHeightPx = remainingHeightCm * pxPerCmHeight;
 
-    // Full image dimensions in pixels (including remaining space)
     const fullImageWidthPx = totalGridWidthPx + remainingWidthPx;
     const fullImageHeightPx = totalGridHeightPx + remainingHeightPx;
 
@@ -111,20 +103,90 @@ const GridOverlay: React.FC<GridOverlayProps> = ({
 
   if (
     !visible ||
-    !gridConfig.isVisible ||
+    (!gridConfig.isVisible && !gridConfig.isDiagonalVisible) ||
     gridCalculation.rows === 0 ||
     gridCalculation.cols === 0
   ) {
     return null;
   }
 
-  const verticalLines = useMemo(() => {
-    const lines = [];
+  // Diagonal lines for ALL cells, including partial/incomplete
+  const diagonalLines = useMemo(() => {
+    if (!gridConfig.isDiagonalVisible) return [];
 
-    // Regular grid lines (full cells)
+    const lines = [];
+    const totalCols = gridCalculation.cols + (gridCalculation.remainingWidthPx > 0 ? 1 : 0);
+    const totalRows = gridCalculation.rows + (gridCalculation.remainingHeightPx > 0 ? 1 : 0);
+
+    // Use standard cell size for diagonals in ALL cells, even partial ones
+    const standardDiagonalLength = Math.sqrt(
+      gridCalculation.cellWidthPx ** 2 + gridCalculation.cellHeightPx ** 2
+    );
+    const positiveAngle = Math.atan(gridCalculation.cellHeightPx / gridCalculation.cellWidthPx) * (180 / Math.PI);
+
+    // For every cell (including FIRST column and partial/incomplete cells), draw both diagonals (/ and \)
+    for (let row = 0; row < totalRows; row++) {
+      for (let col = 0; col < totalCols; col++) {
+        const cellLeft = col * gridCalculation.cellWidthPx;
+        const cellTop = row * gridCalculation.cellHeightPx;
+        const cellRight = cellLeft + gridCalculation.cellWidthPx;
+        const cellBottom = cellTop + gridCalculation.cellHeightPx;
+
+        // Draw / from top-left to bottom-right
+        lines.push(
+          <View
+            key={`diagonal-ltr-${row}-${col}`}
+            style={[
+              styles.diagonalLine,
+              {
+                left: cellLeft,
+                top: cellTop,
+                width: standardDiagonalLength,
+                height: gridConfig.strokeWidth,
+                backgroundColor: gridConfig.strokeColor,
+                transform: [{ rotate: `${positiveAngle}deg` }],
+              },
+            ]}
+          />
+        );
+        // Draw \ from bottom-left to top-right (start at cell's bottom-left corner)
+        lines.push(
+          <View
+            key={`diagonal-rtl-${row}-${col}`}
+            style={[
+              styles.diagonalLine,
+              {
+                left: cellLeft,
+                top: cellBottom - gridConfig.strokeWidth,
+                width: standardDiagonalLength,
+                height: gridConfig.strokeWidth,
+                backgroundColor: gridConfig.strokeColor,
+                transform: [{ rotate: `${-positiveAngle}deg` }],
+              },
+            ]}
+          />
+        );
+      }
+    }
+    return lines;
+  }, [
+    gridConfig.isDiagonalVisible,
+    gridCalculation.cellWidthPx,
+    gridCalculation.cellHeightPx,
+    gridCalculation.cols,
+    gridCalculation.rows,
+    gridCalculation.remainingWidthPx,
+    gridCalculation.remainingHeightPx,
+    gridConfig.strokeWidth,
+    gridConfig.strokeColor,
+  ]);
+
+  // Regular grid lines (as before)
+  const verticalLines = useMemo(() => {
+    if (!gridConfig.isVisible) return [];
+    const lines = [];
     for (let i = 1; i <= gridCalculation.cols; i++) {
-      const leftPosition =
-        gridCalculation.cellWidthPx * i - gridConfig.strokeWidth / 2;
+      const leftPosition = gridCalculation.cellWidthPx * i - gridConfig.strokeWidth / 2;
       lines.push(
         <View
           key={`vertical-${i}`}
@@ -140,9 +202,9 @@ const GridOverlay: React.FC<GridOverlayProps> = ({
         />
       );
     }
-
     return lines;
   }, [
+    gridConfig.isVisible,
     gridCalculation.cols,
     gridCalculation.cellWidthPx,
     gridCalculation.fullImageHeightPx,
@@ -151,12 +213,10 @@ const GridOverlay: React.FC<GridOverlayProps> = ({
   ]);
 
   const horizontalLines = useMemo(() => {
+    if (!gridConfig.isVisible) return [];
     const lines = [];
-
-    // Regular grid lines (full cells)
     for (let i = 1; i <= gridCalculation.rows; i++) {
-      const topPosition =
-        gridCalculation.cellHeightPx * i - gridConfig.strokeWidth / 2;
+      const topPosition = gridCalculation.cellHeightPx * i - gridConfig.strokeWidth / 2;
       lines.push(
         <View
           key={`horizontal-${i}`}
@@ -172,9 +232,9 @@ const GridOverlay: React.FC<GridOverlayProps> = ({
         />
       );
     }
-
     return lines;
   }, [
+    gridConfig.isVisible,
     gridCalculation.rows,
     gridCalculation.cellHeightPx,
     gridCalculation.fullImageWidthPx,
@@ -182,16 +242,16 @@ const GridOverlay: React.FC<GridOverlayProps> = ({
     gridConfig.strokeColor,
   ]);
 
+  // Labels show when either grid or diagonal grid is on
   const renderLabels = useMemo(() => {
     if (!gridConfig.showLabels || gridConfig.labelStyle === 'NONE') {
       return null;
     }
-
     const labels = [];
-
-    // Top row column labels (inside first row cells)
+    const totalCols = gridCalculation.cols + (gridCalculation.remainingWidthPx > 0 ? 1 : 0);
+    const totalRows = gridCalculation.rows + (gridCalculation.remainingHeightPx > 0 ? 1 : 0);
     if (gridConfig.labelStyle === 'COL' || gridConfig.labelStyle === 'BOTH') {
-      for (let col = 0; col < gridCalculation.cols; col++) {
+      for (let col = 0; col < totalCols; col++) {
         labels.push(
           <View
             key={`top-label-${col}`}
@@ -210,10 +270,8 @@ const GridOverlay: React.FC<GridOverlayProps> = ({
         );
       }
     }
-
-    // Left column row labels (inside first column cells)
     if (gridConfig.labelStyle === 'ROW' || gridConfig.labelStyle === 'BOTH') {
-      for (let row = 0; row < gridCalculation.rows; row++) {
+      for (let row = 0; row < totalRows; row++) {
         labels.push(
           <View
             key={`left-label-${row}`}
@@ -232,15 +290,16 @@ const GridOverlay: React.FC<GridOverlayProps> = ({
         );
       }
     }
-
     return labels;
   }, [
     gridConfig.showLabels,
     gridConfig.labelStyle,
-    gridCalculation.cols,
-    gridCalculation.rows,
     gridCalculation.cellWidthPx,
     gridCalculation.cellHeightPx,
+    gridCalculation.cols,
+    gridCalculation.rows,
+    gridCalculation.remainingWidthPx,
+    gridCalculation.remainingHeightPx,
   ]);
 
   return (
@@ -254,31 +313,34 @@ const GridOverlay: React.FC<GridOverlayProps> = ({
       ]}
       pointerEvents="none"
     >
-      {/* Render vertical lines */}
-      {verticalLines}
+      {/* Regular grid lines */}
+      {gridConfig.isVisible && verticalLines}
+      {gridConfig.isVisible && horizontalLines}
 
-      {/* Render horizontal lines */}
-      {horizontalLines}
+      {/* Diagonal grid lines: every cell gets BOTH diagonals */}
+      {gridConfig.isDiagonalVisible && diagonalLines}
 
-      {/* Render labels INSIDE grid cells */}
-      {renderLabels}
+      {/* Labels: when grid/diagonal grid is on */}
+      {(gridConfig.isVisible || gridConfig.isDiagonalVisible) && renderLabels}
 
-      {/* Grid border outline (full image including remaining space) */}
-      <View
-        style={{
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          width: gridCalculation.fullImageWidthPx,
-          height: gridCalculation.fullImageHeightPx,
-          borderWidth: gridConfig.strokeWidth,
-          borderColor: gridConfig.strokeColor,
-        }}
-        pointerEvents="none"
-      />
+      {/* Outline */}
+      {(gridConfig.isVisible || gridConfig.isDiagonalVisible) && (
+        <View
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            width: gridCalculation.fullImageWidthPx,
+            height: gridCalculation.fullImageHeightPx,
+            borderWidth: gridConfig.strokeWidth,
+            borderColor: gridConfig.strokeColor,
+          }}
+          pointerEvents="none"
+        />
+      )}
 
-      {/* Partial/Remaining area visual indicator (optional subtle overlay) */}
-      {gridCalculation.remainingWidthPx > 0 && (
+      {/* Partial/incomplete area indicator (for regular grid only) */}
+      {gridConfig.isVisible && gridCalculation.remainingWidthPx > 0 && (
         <View
           style={{
             position: 'absolute',
@@ -293,8 +355,7 @@ const GridOverlay: React.FC<GridOverlayProps> = ({
           pointerEvents="none"
         />
       )}
-
-      {gridCalculation.remainingHeightPx > 0 && (
+      {gridConfig.isVisible && gridCalculation.remainingHeightPx > 0 && (
         <View
           style={{
             position: 'absolute',
@@ -321,12 +382,17 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     zIndex: 10,
+    overflow: 'hidden',
   },
   verticalLine: {
     position: 'absolute',
   },
   horizontalLine: {
     position: 'absolute',
+  },
+  diagonalLine: {
+    position: 'absolute',
+    transformOrigin: '0 0',
   },
   topLabel: {
     position: 'absolute',
