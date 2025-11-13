@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { StyleSheet, View, Dimensions, Modal } from "react-native";
+import React, { useState, useEffect, useRef } from "react";
+import { StyleSheet, View, Dimensions, Modal, Alert, Text } from "react-native";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "../store/store";
 import {
@@ -8,27 +8,43 @@ import {
   setShowLabels,
   setLabelStyle,
   selectPaperSize,
+  resetAllEdits,
+  setPaperPresetType,
 } from "../store/slices/imageEditSlice";
+import {
+  setImage,
+  setImageLoading,
+  setImageError,
+  clearImage,
+} from "../store/slices/imageSlice";
+import {
+  selectSelectedProject,
+  clearSelectedProject,
+  updateProject
+} from "../store/slices/historySlice";
+import { getProject } from "../../app/services/Storage";
 import GridTabHeaderArea from "../../components/GridTabHeaderArea";
 import GridEditTools from "../../components/GridTools";
 import SpecificGridToolEdit from "../../components/SpecificGridToolEdit";
 import ImageViewer from "../../components/ImageViewer";
 import { TabWrapper } from "@/components/TabWrapper";
+import { captureRef } from 'react-native-view-shot';
 
 const { width, height } = Dimensions.get("window");
 const SCREEN_WIDTH = width;
 const SCREEN_HEIGHT = height;
 
 // Fixed height allocations
-const HEADER_HEIGHT = SCREEN_HEIGHT * 0.08; // 8% for header
-const BOTTOM_HEIGHT = SCREEN_HEIGHT * 0.10; // 10% for bottom bar
+const HEADER_HEIGHT = SCREEN_HEIGHT * 0.08;
+const BOTTOM_HEIGHT = SCREEN_HEIGHT * 0.10;
 const AVAILABLE_IMAGE_HEIGHT = SCREEN_HEIGHT - HEADER_HEIGHT - BOTTOM_HEIGHT;
 const AVAILABLE_IMAGE_WIDTH = SCREEN_WIDTH;
 
 export default function Grid() {
   const dispatch = useDispatch();
+  const imageViewerRef = useRef<View>(null);
 
-  // Redux state selectors, including diagonal grid visibility
+  // Redux state selectors
   const gridState = useSelector((state: RootState) => ({
     isGridVisible: state.imageEdit.isGridVisible,
     isDiagonalGridVisible: state.imageEdit.isDiagonalGridVisible,
@@ -45,13 +61,20 @@ export default function Grid() {
 
   // Image data
   const imageData = useSelector((state: RootState) => ({
+    currentImage: state.image.currentImage,
     width: state.image.width,
     height: state.image.height,
     realWorldWidth: state.image.realWorldWidth,
     realWorldHeight: state.image.realWorldHeight,
     paperPresetType: state.image.paperPresetType,
     isCustomPaper: state.image.paperPresetType === "CUSTOM",
+    source: state.image.source,
   }));
+
+  // Selected project from history
+  const selectedProject = useSelector((state: RootState) =>
+    selectSelectedProject(state)
+  );
 
   // Get paper size info
   const paperSize = useSelector((state: RootState) => selectPaperSize(state));
@@ -59,55 +82,161 @@ export default function Grid() {
   // Modal management state
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [selectedTool, setSelectedTool] = useState<string | null>(null);
+  const [isLoadingProject, setIsLoadingProject] = useState(false);
+
+  // Capture the current image with grid and edits
+  const captureImageWithGrid = async (): Promise<string | null> => {
+    try {
+      if (!imageViewerRef.current) {
+        Alert.alert('Error', 'Cannot capture image at this time');
+        return null;
+      }
+
+      if (!imageData.currentImage) {
+        Alert.alert('No Image', 'Please select an image first');
+        return null;
+      }
+
+      // Capture the image section with high quality
+      const uri = await captureRef(imageViewerRef.current, {
+        format: 'jpg',
+        quality: 1.0, // Maximum quality
+        result: 'tmpfile',
+        width: AVAILABLE_IMAGE_WIDTH * 2, // High resolution
+        height: AVAILABLE_IMAGE_HEIGHT * 2,
+      });
+
+      console.log('📸 Image captured successfully:', uri);
+      return uri;
+    } catch (error) {
+      console.error('❌ Failed to capture image:', error);
+      Alert.alert('Capture Failed', 'Could not capture the image. Please try again.');
+      return null;
+    }
+  };
+
+  // Load selected project when it changes
+  useEffect(() => {
+    if (selectedProject) {
+      loadProjectIntoEditor(selectedProject);
+    }
+  }, [selectedProject]);
+
+  // Load project data into the editor
+  const loadProjectIntoEditor = async (project: any) => {
+    try {
+      setIsLoadingProject(true);
+      dispatch(setImageLoading(true));
+
+      console.log('🔄 Loading project into editor:', project.id);
+
+      // Reset all edits first to ensure clean state
+      dispatch(resetAllEdits());
+
+      // Load the full project data from storage
+      const fullProject = await getProject(project.id);
+      if (!fullProject) {
+        throw new Error('Project data not found in storage');
+      }
+
+      // Set image data
+      dispatch(setImage({
+        uri: fullProject.imageUri,
+        source: fullProject.imageData?.source || 'gallery',
+        width: fullProject.imageData?.width,
+        height: fullProject.imageData?.height,
+        unit: 'px',
+        realWorldWidth: fullProject.realWorldWidth,
+        realWorldHeight: fullProject.realWorldHeight,
+        realWorldUnit: 'cm',
+        paperPresetType: fullProject.paperPreset,
+        presetWidth: fullProject.realWorldWidth,
+        presetHeight: fullProject.realWorldHeight,
+        presetUnit: 'cm',
+        format: fullProject.imageData?.format,
+        mimeType: fullProject.imageData?.mimeType,
+        fileSize: fullProject.imageData?.fileSize,
+        fileName: fullProject.imageData?.fileName,
+      }));
+
+      // Set paper preset
+      dispatch(setPaperPresetType(fullProject.paperPreset));
+
+      // Set edit state if available
+      if (fullProject.editState) {
+        console.log('📝 Loading edit state:', fullProject.editState);
+      }
+
+      console.log('✅ Project loaded successfully:', fullProject.name);
+
+    } catch (error) {
+      console.error('❌ Failed to load project:', error);
+      Alert.alert(
+        'Error Loading Project',
+        'Failed to load the selected project. Please try again.',
+        [{ text: 'OK' }]
+      );
+      // Clear the selected project on error
+      dispatch(clearSelectedProject());
+    } finally {
+      setIsLoadingProject(false);
+      dispatch(setImageLoading(false));
+    }
+  };
+
+  // Save current state back to project
+  const saveCurrentProject = async () => {
+    if (!selectedProject) return;
+
+    try {
+      const fullProject = await getProject(selectedProject.id);
+      if (!fullProject) return;
+
+      // Update project with current state
+      const updatedProject = {
+        ...fullProject,
+        updatedAt: new Date().toISOString(),
+        editState: {
+          strokeWidth: gridState.strokeWidth,
+          strokeColor: gridState.strokeColor,
+          showLabels: gridState.showLabels,
+          labelStyle: gridState.labelStyle,
+          imageEffect: gridState.imageEffect,
+          gridMode: gridState.gridMode,
+          gridCellWidth: gridState.gridCellWidth,
+          gridCellHeight: gridState.gridCellHeight,
+        }
+      };
+
+      // Import and use updateProject
+      const { updateProject } = await import('../../app/store/slices/historySlice.js');
+      dispatch(updateProject(updatedProject));
+
+      console.log('💾 Project changes saved:', selectedProject.id);
+    } catch (error) {
+      console.error('❌ Failed to save project:', error);
+    }
+  };
 
   // Header handlers
   const handleBack = () => {
     console.log("Back pressed");
-    // Implement navigation back logic here
+    // Save changes before going back
+    saveCurrentProject();
+    // Clear selected project when going back
+    dispatch(clearSelectedProject());
   };
 
   const handleHome = () => {
     console.log("Home pressed");
-    // Implement navigation to home logic here
-  };
-
-  const handleExport = () => {
-    const exportData = {
-      paper: {
-        preset: gridState.paperPresetType,
-        width: paperSize.width,
-        height: paperSize.height,
-        unit: "cm",
-        isCustom: imageData.isCustomPaper,
-      },
-      grid: {
-        cellWidth: gridState.gridCellWidth,
-        cellHeight: gridState.gridCellHeight,
-        mode: gridState.gridMode,
-      },
-      visualization: {
-        gridVisible: gridState.isGridVisible,
-        diagonalGridVisible: gridState.isDiagonalGridVisible,
-        labelsVisible: gridState.showLabels,
-        labelStyle: gridState.labelStyle,
-        strokeColor: gridState.strokeColor,
-        strokeWidth: gridState.strokeWidth,
-      },
-      image: {
-        width: imageData.width,
-        height: imageData.height,
-        realWorldWidth: imageData.realWorldWidth,
-        realWorldHeight: imageData.realWorldHeight,
-      },
-    };
-
-    console.log("📤 Exporting with configuration:", exportData);
-    // Implement export logic here with complete configuration
+    // Save changes before going home
+    saveCurrentProject();
+    // Clear selected project
+    dispatch(clearSelectedProject());
   };
 
   const handleExpandToggle = (expanded: boolean) => {
     console.log("Expand toggle:", expanded);
-    // Implement expand/collapse logic here if needed
   };
 
   // Grid and label toggle handlers
@@ -116,6 +245,8 @@ export default function Grid() {
     if (!isVisible && !gridState.isDiagonalGridVisible && gridState.showLabels) {
       dispatch(setShowLabels(false));
     }
+    // Auto-save when grid settings change
+    saveCurrentProject();
   };
 
   const handleDiagonalGridToggle = (isVisible: boolean) => {
@@ -123,6 +254,8 @@ export default function Grid() {
     if (!isVisible && !gridState.isGridVisible && gridState.showLabels) {
       dispatch(setShowLabels(false));
     }
+    // Auto-save when grid settings change
+    saveCurrentProject();
   };
 
   const handleLabelToggle = (isVisible: boolean) => {
@@ -136,6 +269,8 @@ export default function Grid() {
         }
       }
     }
+    // Auto-save when label settings change
+    saveCurrentProject();
   };
 
   // Tool selection handler
@@ -152,7 +287,17 @@ export default function Grid() {
   const handleCloseModal = () => {
     setIsModalVisible(false);
     setSelectedTool(null);
+    // Save when closing tool modal (settings were likely changed)
+    saveCurrentProject();
   };
+
+  // Clear project when component unmounts
+  useEffect(() => {
+    return () => {
+      // Save changes when leaving the Grid tab
+      saveCurrentProject();
+    };
+  }, []);
 
   return (
     <TabWrapper>
@@ -162,27 +307,34 @@ export default function Grid() {
           <GridTabHeaderArea
             onBack={handleBack}
             onHome={handleHome}
-            onExport={handleExport}
             onExpandToggle={handleExpandToggle}
+            onCaptureRequest={captureImageWithGrid} // NEW: Added capture functionality
           />
         </View>
 
         {/* Content - Image Preview fills space between header and bottom */}
-        <View 
+        <View
+          ref={imageViewerRef} // NEW: Added ref for capturing
           style={[
             styles.imageSection,
-            { 
-              top: HEADER_HEIGHT, 
+            {
+              top: HEADER_HEIGHT,
               bottom: BOTTOM_HEIGHT,
               height: AVAILABLE_IMAGE_HEIGHT,
               width: AVAILABLE_IMAGE_WIDTH,
             }
           ]}
         >
-          <ImageViewer 
-            maxWidth={AVAILABLE_IMAGE_WIDTH}
-            maxHeight={AVAILABLE_IMAGE_HEIGHT}
-          />
+          {isLoadingProject ? (
+            <View style={styles.loadingContainer}>
+              <Text style={styles.loadingText}>Loading Project...</Text>
+            </View>
+          ) : (
+            <ImageViewer
+              maxWidth={AVAILABLE_IMAGE_WIDTH}
+              maxHeight={AVAILABLE_IMAGE_HEIGHT}
+            />
+          )}
         </View>
 
         {/* Floating Bottom Tools Area */}
@@ -251,5 +403,16 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     overflow: "hidden",
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  loadingText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

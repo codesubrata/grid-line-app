@@ -1,109 +1,121 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Alert, FlatList, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
-import HistoryCard, { ProjectData } from './HistoryCard';
+import { useSelector, useDispatch } from 'react-redux';
+// Fix: Use dynamic import for React Navigation to handle ES module compatibility
+let useNavigation: any;
+try {
+  // Try ES module import first
+  useNavigation = require('@react-navigation/native').useNavigation;
+} catch (error) {
+  // Fallback to dynamic import if direct require fails
+  import('@react-navigation/native').then(module => {
+    useNavigation = module.useNavigation;
+  }).catch(err => {
+    console.warn('React Navigation not available:', err);
+  });
+}
 
-// Sample static data for demonstration
-const SAMPLE_PROJECTS: ProjectData[] = [
-  {
-    id: '1',
-    title: 'Product Photo Shoot',
-    imageUri: 'https://picsum.photos/400/600?random=1',
-    lastEdited: new Date(Date.now() - 1000 * 60 * 30), // 30 minutes ago
-    ratioPreset: 'A4',
-    thumbnail: 'https://picsum.photos/200/300?random=1'
-  },
-  {
-    id: '2',
-    title: 'Social Media Banner',
-    imageUri: 'https://picsum.photos/400/400?random=2',
-    lastEdited: new Date(Date.now() - 1000 * 60 * 60 * 2), // 2 hours ago
-    ratioPreset: 'Square',
-    thumbnail: 'https://picsum.photos/200/200?random=2'
-  },
-  {
-    id: '3',
-    title: 'Presentation Cover',
-    imageUri: 'https://picsum.photos/600/400?random=3',
-    lastEdited: new Date(Date.now() - 1000 * 60 * 60 * 24), // Yesterday
-    ratioPreset: '16:9',
-    thumbnail: 'https://picsum.photos/300/200?random=3'
-  },
-  {
-    id: '4',
-    title: 'Magazine Layout',
-    imageUri: 'https://picsum.photos/400/600?random=4',
-    lastEdited: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3), // 3 days ago
-    ratioPreset: 'A3',
-    thumbnail: 'https://picsum.photos/200/300?random=4'
-  },
-  {
-    id: '5',
-    title: 'Website Hero Image',
-    imageUri: 'https://picsum.photos/800/400?random=5',
-    lastEdited: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7), // 1 week ago
-    ratioPreset: '16:9',
-    thumbnail: 'https://picsum.photos/400/200?random=5'
-  },
-  {
-    id: '6',
-    title: 'Instagram Story',
-    imageUri: 'https://picsum.photos/400/700?random=6',
-    lastEdited: new Date(Date.now() - 1000 * 60 * 60 * 24 * 14), // 2 weeks ago
-    ratioPreset: 'Custom',
-    thumbnail: 'https://picsum.photos/200/350?random=6'
-  },
-  {
-    id: '7',
-    title: 'Business Card Design',
-    imageUri: 'https://picsum.photos/600/400?random=7',
-    lastEdited: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30), // 1 month ago
-    ratioPreset: 'A5',
-    thumbnail: 'https://picsum.photos/300/200?random=7'
-  },
-  {
-    id: '8',
-    title: 'Poster Campaign',
-    imageUri: 'https://picsum.photos/400/800?random=8',
-    lastEdited: new Date(Date.now() - 1000 * 60 * 60 * 24 * 45), // 1.5 months ago
-    ratioPreset: 'A1',
-    thumbnail: 'https://picsum.photos/200/400?random=8'
-  }
-];
+import HistoryCard, { ProjectData } from './HistoryCard';
+import { RootState } from '../app/store/store';
+import { getProjectList, getProject, deleteProject } from '../app/services/Storage';
+import { setProjects, setLoading, setError, selectProject } from '../app/store/slices/historySlice';
 
 type ViewMode = 'list' | 'grid';
 
 const HistoryList: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('list');
-  const [projects, setProjects] = useState<ProjectData[]>(SAMPLE_PROJECTS);
+  const dispatch = useDispatch();
 
-  // Handle project selection
+  // Initialize navigation with fallback
+  let navigation: any = null;
+  try {
+    navigation = useNavigation?.();
+  } catch (error) {
+    console.warn('Navigation not available:', error);
+  }
+
+  // Get projects from Redux store
+  const { projects, isLoading, error } = useSelector((state: RootState) => state.project);
+
+  // Load projects from storage on component mount
+  useEffect(() => {
+    loadProjectsFromStorage();
+  }, []);
+
+  const loadProjectsFromStorage = async () => {
+    try {
+      dispatch(setLoading(true));
+      const storedProjects = await getProjectList();
+
+      // Load full project details for each project
+      const projectsWithDetails = await Promise.all(
+        storedProjects.map(async (project) => {
+          const fullProject = await getProject(project.id);
+          return fullProject || project; // Fallback to summary if details not found
+        })
+      );
+
+      dispatch(setProjects(projectsWithDetails.filter(Boolean))); // Remove any null projects
+      dispatch(setError(null));
+    } catch (err) {
+      console.error('Failed to load projects:', err);
+      dispatch(setError('Failed to load projects'));
+    } finally {
+      dispatch(setLoading(false));
+    }
+  };
+
+  // Handle project selection - NAVIGATES TO GRID TAB
   const handleProjectPress = (project: ProjectData) => {
-    Alert.alert(
-      'Open Project',
-      `Would you like to open "${project.title}" for editing?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Open', onPress: () => console.log('Opening project:', project.id) }
-      ]
-    );
+    console.log('Selected project:', project.id);
+
+    const selectedProject = projects.find(p => p.id === project.id);
+    if (selectedProject) {
+      dispatch(selectProject(project.id));
+
+      // Navigate to Grid tab if navigation is available
+      if (navigation) {
+        navigation.navigate('Grid' as never);
+        console.log('✅ Navigated to Grid tab with project:', project.title);
+      } else {
+        // Fallback: Show alert that navigation isn't available
+        Alert.alert(
+          'Project Selected',
+          `"${project.title}" is ready for editing. Please switch to the Grid tab to continue.`,
+          [{ text: 'OK' }]
+        );
+        console.log('ℹ️ Project selected, but navigation not available');
+      }
+    }
   };
 
   // Handle project deletion
-  const handleDeleteProject = (projectId: string) => {
+  const handleDeleteProject = async (projectId: string) => {
     const project = projects.find(p => p.id === projectId);
     Alert.alert(
       'Delete Project',
-      `Are you sure you want to delete "${project?.title}"? This action cannot be undone.`,
+      `Are you sure you want to delete "${project?.name}"? This action cannot be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => {
-            setProjects(prevProjects =>
-              prevProjects.filter(p => p.id !== projectId)
-            );
+          onPress: async () => {
+            try {
+              const success = await deleteProject(projectId);
+
+              if (success) {
+                // Reload projects from storage
+                await loadProjectsFromStorage();
+                console.log('🗑️ Project deleted:', projectId);
+              } else {
+                Alert.alert('Error', 'Failed to delete project');
+              }
+            } catch (error) {
+              console.error('Delete error:', error);
+              Alert.alert('Error', 'Failed to delete project');
+            }
           }
         }
       ]
@@ -116,12 +128,45 @@ const HistoryList: React.FC = () => {
       'Project Options',
       `Options for "${project.title}"`,
       [
-        { text: 'Duplicate', onPress: () => console.log('Duplicate:', project.id) },
-        { text: 'Rename', onPress: () => console.log('Rename:', project.id) },
-        { text: 'Share', onPress: () => console.log('Share:', project.id) },
+        {
+          text: 'Duplicate',
+          onPress: () => {
+            console.log('Duplicate project:', project.id);
+            Alert.alert('Coming Soon', 'Duplicate feature will be available in the next update.');
+          }
+        },
+        {
+          text: 'Rename',
+          onPress: () => {
+            console.log('Rename project:', project.id);
+            Alert.alert('Coming Soon', 'Rename feature will be available in the next update.');
+          }
+        },
+        {
+          text: 'Share',
+          onPress: () => {
+            console.log('Share project:', project.id);
+            Alert.alert('Coming Soon', 'Share feature will be available in the next update.');
+          }
+        },
         { text: 'Cancel', style: 'cancel' }
       ]
     );
+  };
+
+  // Convert Redux Project to HistoryCard ProjectData
+  const convertToProjectData = (project: any): ProjectData => {
+    return {
+      id: project.id,
+      title: project.name || 'Untitled Project',
+      imageUri: project.imageUri,
+      lastEdited: new Date(project.updatedAt || project.createdAt),
+      paperPreset: project.paperPreset || 'A4',
+      thumbnail: project.thumbnailUri,
+      realWorldWidth: project.realWorldWidth,
+      realWorldHeight: project.realWorldHeight,
+      isFavorite: project.isFavorite,
+    };
   };
 
   // Render header with view mode toggle
@@ -179,10 +224,38 @@ const HistoryList: React.FC = () => {
     </View>
   );
 
+  // Render loading state
+  const renderLoadingState = () => (
+    <View style={styles.emptyStateContainer}>
+      <MaterialIcons name="hourglass-empty" size={64} color="#48484A" />
+      <Text style={styles.emptyStateTitle}>Loading Projects</Text>
+      <Text style={styles.emptyStateSubtitle}>
+        Please wait while we load your projects...
+      </Text>
+    </View>
+  );
+
+  // Render error state
+  const renderErrorState = () => (
+    <View style={styles.emptyStateContainer}>
+      <MaterialIcons name="error-outline" size={64} color="#FF3B30" />
+      <Text style={styles.emptyStateTitle}>Error Loading Projects</Text>
+      <Text style={styles.emptyStateSubtitle}>
+        {error || 'Failed to load projects'}
+      </Text>
+      <Pressable
+        style={styles.retryButton}
+        onPress={loadProjectsFromStorage}
+      >
+        <Text style={styles.retryButtonText}>Try Again</Text>
+      </Pressable>
+    </View>
+  );
+
   // Render project item
-  const renderProjectItem = ({ item }: { item: ProjectData }) => (
+  const renderProjectItem = ({ item }: { item: any }) => (
     <HistoryCard
-      project={item}
+      project={convertToProjectData(item)}
       viewMode={viewMode}
       onPress={handleProjectPress}
       onDelete={handleDeleteProject}
@@ -194,7 +267,11 @@ const HistoryList: React.FC = () => {
     <SafeAreaView style={styles.container}>
       {renderHeader()}
 
-      {projects.length === 0 ? (
+      {isLoading ? (
+        renderLoadingState()
+      ) : error ? (
+        renderErrorState()
+      ) : projects.length === 0 ? (
         renderEmptyState()
       ) : (
         <FlatList
@@ -202,12 +279,14 @@ const HistoryList: React.FC = () => {
           keyExtractor={(item) => item.id}
           renderItem={renderProjectItem}
           numColumns={viewMode === 'grid' ? 2 : 1}
-          key={viewMode} // Force re-render when switching modes
+          key={viewMode}
           contentContainerStyle={[
             styles.listContainer,
             viewMode === 'grid' && styles.gridContainer
           ]}
           showsVerticalScrollIndicator={false}
+          refreshing={isLoading}
+          onRefresh={loadProjectsFromStorage}
           ItemSeparatorComponent={
             viewMode === 'list'
               ? () => <View style={styles.listSeparator} />
@@ -311,5 +390,17 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     textAlign: 'center',
     lineHeight: 22,
+  },
+  retryButton: {
+    marginTop: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    backgroundColor: '#007AFF',
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

@@ -9,8 +9,10 @@ import {
     setPaperPresetType,
     type PaperPreset
 } from '../app/store/slices/imageEditSlice';
-import { setImage, setImageError, setImageLoading } from '../app/store/slices/imageSlice';
+import { setImage, setImageError, setImageLoading, type SetImagePayload, type DimensionUnit } from '../app/store/slices/imageSlice';
 import type { RootState } from '../app/store/store';
+import { saveProject } from '../app/services/Storage';
+import type { Project } from '../app/store/slices/historySlice';
 
 
 // ========================================
@@ -85,7 +87,7 @@ type Props = {
     isSelectRatioModalVisible: boolean;
     onClose: () => void;
     onAdvancedCrop?: (uri: string) => void;
-    onImageSelected?: () => void;
+    onImageSelected?: (projectId: string) => void;
 };
 
 
@@ -185,6 +187,65 @@ const validateCustomDimensions = (
     }
 
     return { isValid: true };
+};
+
+
+// Generate a unique project ID
+const generateProjectId = (): string => {
+    return `project_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+};
+
+
+// Create project data structure with complete state integration
+const createProjectData = (
+    imageData: SetImagePayload,
+    paperPreset: PaperPreset,
+    realWorldWidth: number,
+    realWorldHeight: number
+): Project => {
+    const projectId = generateProjectId();
+    const timestamp = new Date().toISOString();
+
+    return {
+        // Core project identifiers
+        id: projectId,
+        name: imageData.fileName || 'Untitled Project',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+
+        // Image data
+        imageUri: imageData.uri,
+        paperPreset: paperPreset,
+        realWorldWidth: realWorldWidth,
+        realWorldHeight: realWorldHeight,
+
+        // Image metadata from SetImagePayload
+        imageData: {
+            width: imageData.width || 0,
+            height: imageData.height || 0,
+            format: imageData.format || 'unknown',
+            fileSize: imageData.fileSize,
+            source: imageData.source,
+            mimeType: imageData.mimeType,
+            fileName: imageData.fileName,
+        },
+
+        // Edit state with defaults
+        editState: {
+            strokeWidth: 1,
+            strokeColor: '#000000',
+            showLabels: false,
+            labelStyle: 'NONE',
+            imageEffect: 'none',
+            gridMode: 'default',
+            gridCellWidth: 2,
+            gridCellHeight: 2,
+        },
+
+        // History and UI properties
+        manipulations: [],
+        isFavorite: false,
+    };
 };
 
 
@@ -293,18 +354,100 @@ const ImageSourceOptions = ({
 
 
     // ========================================
-    // IMAGE PICKING & PROCESSING
+    // IMAGE PICKING & PROCESSING WITH PROJECT CREATION
     // ========================================
 
 
+    const processImageAndCreateProject = async (
+        asset: ImagePicker.ImagePickerAsset,
+        source: 'camera' | 'gallery'
+    ) => {
+        // Get current preset or default to A4
+        const currentPreset: PaperPreset = selectedPreset || 'A4';
+
+        // Set real-world dimensions
+        let realWorldWidth: number;
+        let realWorldHeight: number;
+
+        if (currentPreset === "CUSTOM") {
+            realWorldWidth = parseFloat(customWidth) || 21.0;
+            realWorldHeight = parseFloat(customHeight) || 29.7;
+        } else {
+            realWorldWidth = selectedPaper?.cmWidth || 21.0;
+            realWorldHeight = selectedPaper?.cmHeight || 29.7;
+        }
+
+        // Create image data object with proper typing for SetImagePayload
+        const imageData: SetImagePayload = {
+            uri: asset.uri,
+            source: source,
+            width: asset.width,
+            height: asset.height,
+            unit: 'px' as DimensionUnit,
+            realWorldWidth: realWorldWidth,
+            realWorldHeight: realWorldHeight,
+            realWorldUnit: 'cm',
+            paperPresetType: currentPreset,
+            presetWidth: realWorldWidth,
+            presetHeight: realWorldHeight,
+            presetUnit: 'cm',
+            format: extractImageFormat(asset.uri, asset.mimeType),
+            mimeType: asset.mimeType,
+            fileSize: asset.fileSize,
+            fileName: extractFileName(asset.uri || asset.fileName || 'unknown'),
+        };
+
+        // Reset store to default values
+        dispatch(resetAllEdits());
+
+        // Dispatch image with complete metadata
+        dispatch(setImage(imageData));
+
+        // Create and save project to local storage
+        const project = createProjectData(
+            imageData,
+            currentPreset,
+            realWorldWidth,
+            realWorldHeight
+        );
+
+        const saveSuccess = await saveProject(project);
+
+        if (saveSuccess) {
+            console.log('✅ Project saved successfully:', {
+                id: project.id,
+                name: project.name,
+                paperSize: `${realWorldWidth}×${realWorldHeight} cm`,
+                source: source
+            });
+        } else {
+            console.warn('❌ Failed to save project to local storage');
+            Alert.alert(
+                'Storage Warning',
+                'Project created but failed to save to local storage. Some features may not work properly.',
+                [{ text: 'OK' }]
+            );
+        }
+
+        // Call onImageSelected with project ID
+        if (onImageSelected) {
+            onImageSelected(project.id);
+        }
+
+        return project;
+    };
+
+
     const pickImage = async (source: 'camera' | 'gallery') => {
+        const currentPreset: PaperPreset = selectedPreset || 'A4';
+
         if (!isContinueEnabled()) {
             Alert.alert('Error', 'Please select a paper size or set valid custom dimensions');
             return;
         }
 
         // Validate custom dimensions if needed
-        if (selectedPreset === "CUSTOM") {
+        if (currentPreset === "CUSTOM") {
             const validation = validateCustomDimensions(customWidth, customHeight);
             if (!validation.isValid) {
                 setCustomDimensionError(validation.error || 'Invalid dimensions');
@@ -374,48 +517,8 @@ const ImageSourceOptions = ({
                     return;
                 }
 
-                // Reset store to default values
-                dispatch(resetAllEdits());
-
-                // Set real-world dimensions
-                let realWorldWidth: number;
-                let realWorldHeight: number;
-
-                if (selectedPreset === "CUSTOM") {
-                    realWorldWidth = parseFloat(customWidth) || 21.0;
-                    realWorldHeight = parseFloat(customHeight) || 29.7;
-                } else {
-                    realWorldWidth = selectedPaper?.cmWidth || 21.0;
-                    realWorldHeight = selectedPaper?.cmHeight || 29.7;
-                }
-
-                // Dispatch image with complete metadata
-                dispatch(setImage({
-                    uri: asset.uri,
-                    source: source,
-
-                    width: asset.width,
-                    height: asset.height,
-                    unit: 'px',
-
-                    realWorldWidth: realWorldWidth,
-                    realWorldHeight: realWorldHeight,
-                    realWorldUnit: 'cm',
-                    paperPresetType: selectedPreset,
-
-                    presetWidth: realWorldWidth,
-                    presetHeight: realWorldHeight,
-                    presetUnit: 'cm',
-
-                    format: extractImageFormat(asset.uri, asset.mimeType),
-                    mimeType: asset.mimeType,
-                    fileSize: asset.fileSize,
-                    fileName: extractFileName(asset.uri || asset.fileName || 'unknown'),
-                }));
-
-                if (onImageSelected) {
-                    onImageSelected();
-                }
+                // Process image and create project
+                const project = await processImageAndCreateProject(asset, source);
 
                 // Optional: trigger advanced crop for non-A4 sizes
                 const needsAdvancedCrop = onAdvancedCrop && selectedPaper?.preset !== 'A4';
@@ -680,7 +783,7 @@ const ImageSourceOptions = ({
                         {isLoading ? (
                             <View style={styles.loadingContainer}>
                                 <ActivityIndicator size="large" color="#007AFF" />
-                                <Text style={styles.loadingText}>Loading...</Text>
+                                <Text style={styles.loadingText}>Creating Project...</Text>
                             </View>
                         ) : (
                             <View style={styles.uploadOptions}>
@@ -713,6 +816,7 @@ const ImageSourceOptions = ({
                             <Text style={styles.infoText}>
                                 Supported formats: JPEG, PNG, WebP
                             </Text>
+
                         </View>
                     </View>
                 </View>
@@ -722,6 +826,10 @@ const ImageSourceOptions = ({
 };
 
 export default ImageSourceOptions;
+
+// ========================================
+// STYLES
+// ========================================
 
 const styles = StyleSheet.create({
     modalOverlay: {
@@ -797,7 +905,6 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     dropdownContainer: {
-        // position: 'relative',
         marginTop: 4,
         borderWidth: 1,
         borderColor: "#444",
@@ -840,10 +947,6 @@ const styles = StyleSheet.create({
         opacity: 0.8,
     },
     customInputFields: {
-        // position: 'absolute',
-        // top: 0,
-        // left: 0,
-        // right: 0,
         paddingHorizontal: 16,
         paddingVertical: 12,
         borderTopWidth: 1,

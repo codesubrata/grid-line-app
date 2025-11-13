@@ -2,14 +2,18 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import React from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
-// Define the project data structure
+// Updated ProjectData interface to match Redux store structure
 export interface ProjectData {
     id: string;
     title: string;
     imageUri: string;
     lastEdited: Date;
-    ratioPreset: string;
-    thumbnail?: string; // Optional smaller preview image
+    paperPreset: string; // Changed from ratioPreset to paperPreset to match Redux
+    thumbnail?: string;
+    // Additional fields from Redux store for future use
+    realWorldWidth?: number;
+    realWorldHeight?: number;
+    isFavorite?: boolean;
 }
 
 interface HistoryCardProps {
@@ -27,7 +31,7 @@ const HistoryCard: React.FC<HistoryCardProps> = ({
     onDelete,
     onMoreOptions
 }) => {
-    // Format the last edited date
+    // Format the last edited date - enhanced with better time formatting
     const formatDate = (date: Date) => {
         const now = new Date();
         const diff = now.getTime() - date.getTime();
@@ -44,6 +48,9 @@ const HistoryCard: React.FC<HistoryCardProps> = ({
             return 'Yesterday';
         } else if (days < 7) {
             return `${days}d ago`;
+        } else if (days < 30) {
+            const weeks = Math.floor(days / 7);
+            return weeks === 1 ? '1 week ago' : `${weeks} weeks ago`;
         } else {
             return date.toLocaleDateString('en-US', {
                 month: 'short',
@@ -51,6 +58,28 @@ const HistoryCard: React.FC<HistoryCardProps> = ({
                 year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
             });
         }
+    };
+
+    // Get display text for paper preset
+    const getPaperPresetDisplay = (preset: string) => {
+        const presetMap: { [key: string]: string } = {
+            'A0': 'A0',
+            'A1': 'A1',
+            'A2': 'A2',
+            'A3': 'A3',
+            'A4': 'A4',
+            'A5': 'A5',
+            'CUSTOM': 'Custom'
+        };
+        return presetMap[preset] || preset;
+    };
+
+    // Get dimensions display if available
+    const getDimensionsDisplay = () => {
+        if (project.realWorldWidth && project.realWorldHeight) {
+            return `${project.realWorldWidth}×${project.realWorldHeight} cm`;
+        }
+        return getPaperPresetDisplay(project.paperPreset);
     };
 
     if (viewMode === 'list') {
@@ -67,8 +96,16 @@ const HistoryCard: React.FC<HistoryCardProps> = ({
                             source={{ uri: project.thumbnail || project.imageUri }}
                             style={styles.listImage}
                             resizeMode="cover"
+                            onError={(error) => console.log('Image load error:', error.nativeEvent.error)}
                         />
                         <View style={styles.listImageOverlay} />
+
+                        {/* Favorite Indicator */}
+                        {project.isFavorite && (
+                            <View style={styles.favoriteBadge}>
+                                <MaterialIcons name="star" size={12} color="#FFD60A" />
+                            </View>
+                        )}
                     </View>
 
                     {/* Content */}
@@ -77,13 +114,18 @@ const HistoryCard: React.FC<HistoryCardProps> = ({
                             <Text style={styles.listTitle} numberOfLines={1}>
                                 {project.title}
                             </Text>
-                            <Text style={styles.listRatio}>
-                                {project.ratioPreset}
+                            <Text style={styles.listPaperPreset}>
+                                {getPaperPresetDisplay(project.paperPreset)}
                             </Text>
                         </View>
                         <Text style={styles.listDate}>
                             Last edited • {formatDate(project.lastEdited)}
                         </Text>
+                        {project.realWorldWidth && project.realWorldHeight && (
+                            <Text style={styles.listDimensions}>
+                                {project.realWorldWidth}×{project.realWorldHeight} cm
+                            </Text>
+                        )}
                     </View>
 
                     {/* Action Buttons */}
@@ -122,8 +164,16 @@ const HistoryCard: React.FC<HistoryCardProps> = ({
                         source={{ uri: project.thumbnail || project.imageUri }}
                         style={styles.gridImage}
                         resizeMode="cover"
+                        onError={(error) => console.log('Image load error:', error.nativeEvent.error)}
                     />
                     <View style={styles.gridImageOverlay} />
+
+                    {/* Favorite Indicator */}
+                    {project.isFavorite && (
+                        <View style={styles.gridFavoriteBadge}>
+                            <MaterialIcons name="star" size={14} color="#FFD60A" />
+                        </View>
+                    )}
 
                     {/* More Options Button */}
                     <Pressable
@@ -134,10 +184,10 @@ const HistoryCard: React.FC<HistoryCardProps> = ({
                         <MaterialIcons name="more-vert" size={16} color="#fff" />
                     </Pressable>
 
-                    {/* Ratio Badge */}
-                    <View style={styles.gridRatioBadge}>
-                        <Text style={styles.gridRatioText}>
-                            {project.ratioPreset}
+                    {/* Paper Preset Badge */}
+                    <View style={styles.gridPaperBadge}>
+                        <Text style={styles.gridPaperText}>
+                            {getPaperPresetDisplay(project.paperPreset)}
                         </Text>
                     </View>
                 </View>
@@ -150,6 +200,11 @@ const HistoryCard: React.FC<HistoryCardProps> = ({
                     <Text style={styles.gridDate}>
                         {formatDate(project.lastEdited)}
                     </Text>
+                    {project.realWorldWidth && project.realWorldHeight && (
+                        <Text style={styles.gridDimensions}>
+                            {project.realWorldWidth}×{project.realWorldHeight} cm
+                        </Text>
+                    )}
                 </View>
             </View>
         </Pressable>
@@ -188,6 +243,7 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.4,
         shadowRadius: 4,
         elevation: 4,
+        position: 'relative',
     },
     listImage: {
         width: '100%',
@@ -200,6 +256,14 @@ const styles = StyleSheet.create({
         right: 0,
         bottom: 0,
         backgroundColor: 'rgba(0, 0, 0, 0.1)',
+    },
+    favoriteBadge: {
+        position: 'absolute',
+        top: 4,
+        left: 4,
+        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+        borderRadius: 8,
+        padding: 2,
     },
     listTextContent: {
         flex: 1,
@@ -218,7 +282,7 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         flex: 1,
     },
-    listRatio: {
+    listPaperPreset: {
         fontSize: 11,
         fontWeight: '500',
         color: '#007AFF',
@@ -232,6 +296,12 @@ const styles = StyleSheet.create({
         fontSize: 13,
         color: '#8E8E93',
         fontWeight: '400',
+        marginBottom: 2,
+    },
+    listDimensions: {
+        fontSize: 12,
+        color: '#34C759',
+        fontWeight: '500',
     },
     listActions: {
         flexDirection: 'row',
@@ -290,6 +360,14 @@ const styles = StyleSheet.create({
         bottom: 0,
         backgroundColor: 'rgba(0, 0, 0, 0.15)',
     },
+    gridFavoriteBadge: {
+        position: 'absolute',
+        top: 6,
+        left: 6,
+        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+        borderRadius: 10,
+        padding: 3,
+    },
     gridMoreButton: {
         position: 'absolute',
         top: 8,
@@ -306,7 +384,7 @@ const styles = StyleSheet.create({
         shadowRadius: 3,
         elevation: 3,
     },
-    gridRatioBadge: {
+    gridPaperBadge: {
         position: 'absolute',
         bottom: 8,
         left: 8,
@@ -320,7 +398,7 @@ const styles = StyleSheet.create({
         shadowRadius: 2,
         elevation: 2,
     },
-    gridRatioText: {
+    gridPaperText: {
         fontSize: 10,
         fontWeight: '600',
         color: '#FFFFFF',
@@ -338,5 +416,11 @@ const styles = StyleSheet.create({
         fontSize: 11,
         color: '#8E8E93',
         fontWeight: '400',
+        marginBottom: 2,
+    },
+    gridDimensions: {
+        fontSize: 10,
+        color: '#34C759',
+        fontWeight: '500',
     },
 });

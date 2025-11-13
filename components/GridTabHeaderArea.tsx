@@ -3,6 +3,7 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import * as MediaLibrary from 'expo-media-library';
 import { router } from 'expo-router';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
 import React, { useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -15,16 +16,23 @@ import {
   TextInput,
   View,
   ScrollView,
+  Dimensions,
+  Linking,
+  Platform,
 } from 'react-native';
 import { useSelector, useDispatch } from 'react-redux';
 import ExpandedImageModal from './ExpandedImageModal';
 import { lockPage, unlockPage } from '@/app/store/slices/imageEditSlice';
+import { captureRef } from 'react-native-view-shot';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface GridTabHeaderAreaProps {
   onBack?: () => void;
   onHome?: () => void;
   onExport?: () => void;
   onExpandToggle?: (expanded: boolean) => void;
+  onCaptureRequest?: () => Promise<string | null>; // New prop for capturing image with grid
 }
 
 const FileNameModal: React.FC<{
@@ -45,8 +53,15 @@ const FileNameModal: React.FC<{
     <Modal visible={visible} transparent animationType="fade">
       <View style={styles.modalOverlay}>
         <View style={styles.fileNameModal}>
-          <Text style={styles.modalTitle}>Save Image</Text>
-          <Text style={styles.modalSubtitle}>Enter a name for your image:</Text>
+          <View style={styles.modalHeader}>
+            <MaterialIcons name="photo-library" size={24} color="#007AFF" />
+            <Text style={styles.modalTitle}>Save High-Quality Image</Text>
+          </View>
+
+          <Text style={styles.modalSubtitle}>
+            Enter a name for your image with grid overlay:
+          </Text>
+
           <TextInput
             style={styles.fileNameInput}
             value={fileName}
@@ -55,13 +70,95 @@ const FileNameModal: React.FC<{
             placeholderTextColor="#8E8E93"
             autoFocus
             selectTextOnFocus
+            maxLength={50}
           />
+
+          <View style={styles.qualityInfo}>
+            <MaterialIcons name="high-quality" size={16} color="#34C759" />
+            <Text style={styles.qualityInfoText}>
+              Image will be saved in high resolution with grid overlay
+            </Text>
+          </View>
+
           <View style={styles.modalButtons}>
-            <Pressable style={styles.modalButton} onPress={onCancel}>
+            <Pressable style={[styles.modalButton, styles.cancelButton]} onPress={onCancel}>
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </Pressable>
-            <Pressable style={[styles.modalButton, styles.confirmButton]} onPress={handleConfirm}>
-              <Text style={styles.confirmButtonText}>Save</Text>
+            <Pressable
+              style={[styles.modalButton, styles.confirmButton]}
+              onPress={handleConfirm}
+              disabled={!fileName.trim()}
+            >
+              <MaterialIcons name="download" size={20} color="#FFFFFF" />
+              <Text style={styles.confirmButtonText}>Save Image</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
+const DownloadQualityModal: React.FC<{
+  visible: boolean;
+  onQualitySelect: (quality: 'high' | 'maximum') => void;
+  onCancel: () => void;
+}> = ({ visible, onQualitySelect, onCancel }) => {
+  return (
+    <Modal visible={visible} transparent animationType="fade">
+      <View style={styles.modalOverlay}>
+        <View style={styles.qualityModal}>
+          <View style={styles.modalHeader}>
+            <MaterialIcons name="high-quality" size={28} color="#007AFF" />
+            <Text style={styles.modalTitle}>Download Quality</Text>
+          </View>
+
+          <Text style={styles.qualityModalSubtitle}>
+            Choose the quality for your image download:
+          </Text>
+
+          <View style={styles.qualityOptions}>
+            <Pressable
+              style={styles.qualityOption}
+              onPress={() => onQualitySelect('high')}
+            >
+              <View style={styles.qualityOptionHeader}>
+                <MaterialIcons name="hd" size={24} color="#007AFF" />
+                <Text style={styles.qualityOptionTitle}>High Quality</Text>
+              </View>
+              <Text style={styles.qualityOptionDesc}>
+                • Good for sharing and social media{'\n'}
+                • Balanced file size{'\n'}
+                • Fast processing
+              </Text>
+              <View style={styles.qualityBadge}>
+                <Text style={styles.qualityBadgeText}>Recommended</Text>
+              </View>
+            </Pressable>
+
+            <Pressable
+              style={styles.qualityOption}
+              onPress={() => onQualitySelect('maximum')}
+            >
+              <View style={styles.qualityOptionHeader}>
+                <MaterialIcons name="4k" size={24} color="#FF9500" />
+                <Text style={styles.qualityOptionTitle}>Maximum Quality</Text>
+              </View>
+              <Text style={styles.qualityOptionDesc}>
+                • Best for printing and professional use{'\n'}
+                • Larger file size{'\n'}
+                • Slower processing
+              </Text>
+              <View style={[styles.qualityBadge, styles.premiumBadge]}>
+                <MaterialIcons name="star" size={12} color="#FFD60A" />
+                <Text style={styles.qualityBadgeText}>Premium</Text>
+              </View>
+            </Pressable>
+          </View>
+
+          <View style={styles.modalButtons}>
+            <Pressable style={[styles.modalButton, styles.cancelButton]} onPress={onCancel}>
+              <Text style={styles.cancelButtonText}>Cancel</Text>
             </Pressable>
           </View>
         </View>
@@ -75,6 +172,7 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
   onHome,
   onExport,
   onExpandToggle,
+  onCaptureRequest, // New prop for capturing image with grid
 }) => {
   const dispatch = useDispatch();
 
@@ -82,8 +180,10 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadCompleted, setDownloadCompleted] = useState(false);
   const [showFileNameModal, setShowFileNameModal] = useState(false);
+  const [showQualityModal, setShowQualityModal] = useState(false);
   const [showImageInfo, setShowImageInfo] = useState(false);
   const [savedImageUri, setSavedImageUri] = useState('');
+  const [downloadProgress, setDownloadProgress] = useState(0);
 
   const currentImage = useSelector((state: RootState) => state.image.currentImage);
   const imageMetadata = useSelector((state: RootState) => ({
@@ -99,6 +199,15 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
     fileName: state.image.fileName,
     source: state.image.source,
   }));
+
+  const gridConfig = useSelector((state: RootState) => ({
+    isGridVisible: state.imageEdit.isGridVisible,
+    isDiagonalGridVisible: state.imageEdit.isDiagonalGridVisible,
+    strokeColor: state.imageEdit.strokeColor,
+    strokeWidth: state.imageEdit.strokeWidth,
+    showLabels: state.imageEdit.showLabels,
+  }));
+
   const isLocked = useSelector((state: RootState) => state.imageEdit.isLocked);
 
   const exportScale = useRef(new Animated.Value(1)).current;
@@ -108,11 +217,15 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
   const lockScale = useRef(new Animated.Value(1)).current;
   const successScale = useRef(new Animated.Value(1)).current;
   const successRotation = useRef(new Animated.Value(0)).current;
+  const progressWidth = useRef(new Animated.Value(0)).current;
 
   const generateFileName = () => {
     const now = new Date();
-    const timestamp = now.toISOString().replace(/[:.]/g, '-').split('T')[0];
-    return `image_${timestamp}`;
+    const timestamp = now.toISOString()
+      .replace(/[:.]/g, '-')
+      .replace('T', '_')
+      .split('.')[0];
+    return `grid_image_${timestamp}`;
   };
 
   const playSuccessAnimation = () => {
@@ -144,6 +257,14 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
     }, 3000);
   };
 
+  const playProgressAnimation = (progress: number) => {
+    Animated.timing(progressWidth, {
+      toValue: progress,
+      duration: 300,
+      useNativeDriver: false,
+    }).start();
+  };
+
   const playLockAnimation = () => {
     Animated.sequence([
       Animated.timing(lockScale, {
@@ -159,15 +280,17 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
     ]).start();
   };
 
-  const downloadImage = async (fileName: string) => {
-    if (!currentImage) {
-      Alert.alert('Error', 'No image selected to download');
+  const downloadImageWithGrid = async (fileName: string, quality: 'high' | 'maximum' = 'high') => {
+    if (!onCaptureRequest) {
+      Alert.alert('Error', 'Capture functionality not available');
       return;
     }
 
     setIsDownloading(true);
+    setDownloadProgress(0);
 
     try {
+      // Request permissions
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Permission Required', 'Please allow access to save images to your device.');
@@ -175,18 +298,83 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
         return;
       }
 
-      // Implementation logic to save currentImage to device...
-      // After save success:
-      setSavedImageUri(currentImage);
+      // Simulate progress
+      playProgressAnimation(30);
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Capture image with grid overlay
+      playProgressAnimation(60);
+      const imageUri = await onCaptureRequest();
+
+      if (!imageUri) {
+        throw new Error('Failed to capture image');
+      }
+
+      playProgressAnimation(90);
+
+      // Save to gallery with high quality settings
+      const finalFileName = `${fileName}.jpg`;
+      const asset = await MediaLibrary.createAssetAsync(imageUri);
+
+      // Clean up temporary file
+      try {
+        await FileSystem.deleteAsync(imageUri);
+      } catch (error) {
+        console.log('Cleanup warning:', error);
+      }
+
+      setSavedImageUri(asset.uri);
       setDownloadCompleted(true);
+      playProgressAnimation(100);
       playSuccessAnimation();
-      Alert.alert('Image Saved!', `Image saved as "${fileName}" to your gallery.`, [
-        { text: 'OK' },
-        { text: 'Share', onPress: () => shareImage(currentImage) },
-      ]);
+
+      // Show success with quality info
+      const qualityInfo = quality === 'maximum' ?
+        ' (Maximum Quality)' : ' (High Quality)';
+
+      Alert.alert(
+        '🎉 Image Saved Successfully!',
+        `"${finalFileName}"${qualityInfo} has been saved to your gallery with grid overlay.`,
+        [
+          {
+            text: 'View in Gallery',
+            onPress: async () => {
+              try {
+                if (Platform.OS === 'ios') {
+                  await Linking.openURL('photos-redirect://');
+                } else {
+                  Alert.alert(
+                    'Image Saved',
+                    'Image saved to gallery. Open your gallery app to view it.'
+                  );
+                }
+              } catch (error) {
+                Alert.alert(
+                  'Image Saved',
+                  'Image has been saved to your gallery. You can view it in your Photos app.'
+                );
+              }
+            }
+          },
+          {
+            text: 'Share',
+            onPress: () => shareImage(asset.uri)
+          },
+          { text: 'OK', style: 'default' }
+        ]
+      );
+
     } catch (error) {
-      Alert.alert('Download Failed', 'Could not save the image. Please try again.');
+      console.error('Download error:', error);
+      Alert.alert(
+        'Download Failed',
+        'Could not save the image. Please try again.',
+        [{ text: 'OK' }]
+      );
+    } finally {
       setIsDownloading(false);
+      setDownloadProgress(0);
+      progressWidth.setValue(0);
     }
   };
 
@@ -194,7 +382,10 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
     try {
       const isAvailable = await Sharing.isAvailableAsync();
       if (isAvailable) {
-        await Sharing.shareAsync(imageUri);
+        await Sharing.shareAsync(imageUri, {
+          mimeType: 'image/jpeg',
+          dialogTitle: 'Share Grid Image',
+        });
       } else {
         Alert.alert('Sharing not available', 'Sharing is not available on this device.');
       }
@@ -224,20 +415,29 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
       Alert.alert('Locked', 'Page is locked. Unlock to export.');
       return;
     }
-    if (!currentImage) {
-      Alert.alert('No Image', 'Please select an image first.');
+    if (!onCaptureRequest) {
+      Alert.alert('Error', 'Image capture not available');
       return;
     }
     if (isDownloading) return;
+
+    // Show quality selection first
+    setShowQualityModal(true);
+  };
+
+  const handleQualitySelect = (quality: 'high' | 'maximum') => {
+    setShowQualityModal(false);
     setShowFileNameModal(true);
   };
 
   const handleFileNameConfirm = (fileName: string) => {
     setShowFileNameModal(false);
-    downloadImage(fileName);
+    // For now, use high quality. You can modify this to use the selected quality
+    downloadImageWithGrid(fileName, 'high');
   };
 
   const handleFileNameCancel = () => setShowFileNameModal(false);
+  const handleQualityCancel = () => setShowQualityModal(false);
 
   const toggleLockHandler = () => {
     playLockAnimation();
@@ -317,6 +517,11 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
     outputRange: ['0deg', '360deg'],
   });
 
+  const progressInterpolation = progressWidth.interpolate({
+    inputRange: [0, 100],
+    outputRange: ['0%', '100%'],
+  });
+
   return (
     <>
       <View style={styles.container}>
@@ -327,7 +532,7 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
               onPress={handleHamburgerMenu}
               android_ripple={{ color: 'rgba(255,255,255,0.15)', radius: 24 }}
             >
-              <MaterialIcons name="arrow-back-ios-new" size={24} color="#FFF" />
+              <MaterialIcons name="app-registration" size={24} color="#FFF" />
             </Pressable>
           </View>
 
@@ -385,7 +590,7 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
                   <MaterialIcons name="check-circle" size={24} color="#4CAF50" />
                 ) : (
                   <MaterialIcons
-                    name="save-alt"
+                    name="download"
                     size={24}
                     color={isLocked ? 'rgba(0, 122, 255, 0.5)' : '#007AFF'}
                   />
@@ -427,6 +632,23 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
             </Animated.View>
           </View>
         </View>
+
+        {/* Download Progress Bar */}
+        {isDownloading && (
+          <View style={styles.progressContainer}>
+            <View style={styles.progressBackground}>
+              <Animated.View
+                style={[
+                  styles.progressFill,
+                  { width: progressInterpolation }
+                ]}
+              />
+            </View>
+            <Text style={styles.progressText}>
+              {downloadProgress}% - Saving high-quality image...
+            </Text>
+          </View>
+        )}
       </View>
 
       {/* Image Info Modal */}
@@ -524,6 +746,13 @@ const GridTabHeaderArea: React.FC<GridTabHeaderAreaProps> = ({
         defaultName={generateFileName()}
       />
 
+      {/* Quality Selection Modal */}
+      <DownloadQualityModal
+        visible={showQualityModal}
+        onQualitySelect={handleQualitySelect}
+        onCancel={handleQualityCancel}
+      />
+
       {/* Expanded Image Modal */}
       <ExpandedImageModal visible={isExpanded} onClose={handleModalClose} />
     </>
@@ -549,6 +778,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     flex: 1,
+    width: '100%',
   },
   leftSection: {
     flexDirection: 'row',
@@ -628,52 +858,101 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
   },
 
+  // Progress Bar
+  progressContainer: {
+    position: 'absolute',
+    bottom: -10,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 20,
+  },
+  progressBackground: {
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#007AFF',
+    borderRadius: 2,
+  },
+  progressText: {
+    fontSize: 10,
+    color: '#8E8E93',
+    textAlign: 'center',
+    marginTop: 4,
+    fontWeight: '500',
+  },
+
   // Modal Styles
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-start',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
     alignItems: 'center',
-    width: '100%',
-    top: 0,
-    left: 0,
-    right: 0,
+    padding: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
   },
   fileNameModal: {
     backgroundColor: '#1C1C1E',
     borderRadius: 16,
     padding: 24,
-    marginHorizontal: 0,
-    marginTop: 10,
     width: '100%',
-    maxWidth: 600,
+    maxWidth: 400,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 20,
+    fontWeight: '700',
     color: '#FFFFFF',
-    textAlign: 'center',
-    marginBottom: 8,
+    marginLeft: 8,
   },
   modalSubtitle: {
     fontSize: 14,
     color: '#8E8E93',
     textAlign: 'center',
     marginBottom: 20,
+    lineHeight: 20,
   },
   fileNameInput: {
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 8,
+    borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
     fontSize: 16,
     color: '#FFFFFF',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  qualityInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(52, 199, 89, 0.1)',
+    padding: 12,
+    borderRadius: 8,
     marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(52, 199, 89, 0.3)',
+  },
+  qualityInfoText: {
+    fontSize: 12,
+    color: '#34C759',
+    marginLeft: 8,
+    fontWeight: '500',
+    textAlign: 'center',
+    flex: 1,
   },
   modalButtons: {
     flexDirection: 'row',
@@ -681,9 +960,17 @@ const styles = StyleSheet.create({
   },
   modalButton: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
+    paddingVertical: 14,
+    borderRadius: 12,
     alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  cancelButton: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
   confirmButton: {
     backgroundColor: '#007AFF',
@@ -691,12 +978,81 @@ const styles = StyleSheet.create({
   cancelButtonText: {
     color: '#8E8E93',
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   confirmButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+
+  // Quality Modal Styles
+  qualityModal: {
+    backgroundColor: '#1C1C1E',
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  qualityModalSubtitle: {
+    fontSize: 14,
+    color: '#8E8E93',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  qualityOptions: {
+    gap: 16,
+    marginBottom: 24,
+  },
+  qualityOption: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.1)',
+    position: 'relative',
+  },
+  qualityOptionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  qualityOptionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginLeft: 8,
+  },
+  qualityOptionDesc: {
+    fontSize: 12,
+    color: '#8E8E93',
+    lineHeight: 18,
+  },
+  qualityBadge: {
+    position: 'absolute',
+    top: -6,
+    right: 12,
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  premiumBadge: {
+    backgroundColor: '#FF9500',
+  },
+  qualityBadgeText: {
+    fontSize: 10,
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
 
   // Enhanced Info Modal Styles

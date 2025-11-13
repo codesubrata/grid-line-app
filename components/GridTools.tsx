@@ -45,7 +45,7 @@ const GridEditTools: React.FC<GridEditToolsProps> = ({
     const isLocked = useSelector((state: any) => state.imageEdit.isLocked);
 
     const editTools: EditTool[] = [
-        { id: 'frame', name: 'Frame', icon: 'border-all', category: 'effects' },
+        { id: 'frame', name: 'Frame', icon: 'apps', category: 'effects' },
         { id: 'stroke', name: 'Stroke', icon: 'border-color', category: 'effects' },
         { id: 'fx', name: 'Effects', icon: 'auto-fix-high', category: 'effects' },
         { id: 'sharpen', name: 'Sharpen', icon: 'tune', category: 'effects' },
